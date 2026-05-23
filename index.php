@@ -1,5 +1,6 @@
 <?php
 require_once 'config/db.php';  // also loads risk_engine.php
+require_once 'includes/market_awareness.php';
 
 $db     = getDB();
 $userId = DEFAULT_USER_ID;
@@ -83,6 +84,7 @@ if ($lastSO) {
 
 $pageTitle = 'Dashboard';
 $rootPath  = '';
+$market    = getMarketAwareness();
 include 'includes/header.php';
 ?>
 
@@ -127,6 +129,250 @@ include 'includes/header.php';
         <i class="fas fa-power-off"></i> Stop Out Account
     </button>
 </div>
+
+<?php
+// ── MARKET AWARENESS DATA ──────────────────────────────────────────────────
+$mDay  = $market['day'];
+$mSess = $market['session'];
+$mFomc = $market['fomc'];
+$mNfp  = $market['nfp'];
+
+// Hardcoded rgba maps — no color-mix(), guaranteed browser support
+$maColors = [
+    'profit' => ['txt'=>'#16a34a', 'bg'=>'rgba(22,163,74,.13)',   'border'=>'rgba(22,163,74,.28)',   'bar'=>'#16a34a'],
+    'warn'   => ['txt'=>'#d97706', 'bg'=>'rgba(217,119,6,.13)',    'border'=>'rgba(217,119,6,.28)',    'bar'=>'#d97706'],
+    'cyan'   => ['txt'=>'#0891b2', 'bg'=>'rgba(8,145,178,.13)',    'border'=>'rgba(8,145,178,.28)',    'bar'=>'#0891b2'],
+    'blue'   => ['txt'=>'#2563eb', 'bg'=>'rgba(37,99,235,.13)',    'border'=>'rgba(37,99,235,.28)',    'bar'=>'#2563eb'],
+    'muted'  => ['txt'=>'#94a3b8', 'bg'=>'rgba(148,163,184,.10)', 'border'=>'rgba(148,163,184,.2)',  'bar'=>'#94a3b8'],
+    'loss'   => ['txt'=>'#dc2626', 'bg'=>'rgba(220,38,38,.13)',    'border'=>'rgba(220,38,38,.28)',    'bar'=>'#dc2626'],
+    'purple' => ['txt'=>'#7c3aed', 'bg'=>'rgba(124,58,237,.13)',   'border'=>'rgba(124,58,237,.28)',   'bar'=>'#7c3aed'],
+];
+$dc  = $maColors[$mDay['color']]  ?? $maColors['muted'];
+$sc  = $maColors[$mSess['color']] ?? $maColors['muted'];
+$pc  = $maColors['purple'];
+?>
+
+<?php /* ── TOP ALERT BANNERS (reuse existing risk-alert styles) ── */ ?>
+<?php if ($mNfp['is_today']): ?>
+<div class="risk-alert risk-alert-breach mb-3">
+    <i class="fas fa-bomb fa-lg"></i>
+    <div><strong>🚨 NFP DAY — Non-Farm Payrolls at 6:00 PM IST</strong><br>
+    <small>EXTREME volatility expected. Spreads will spike, stops may be hunted. Stay flat near 6 PM IST.</small></div>
+</div>
+<?php elseif ($mFomc['is_today']): ?>
+<div class="risk-alert risk-alert-breach mb-3">
+    <i class="fas fa-landmark fa-lg"></i>
+    <div><strong>🔴 FOMC DAY — Federal Reserve Decision at 11:30 PM IST</strong><br>
+    <small>Massive USD moves expected. All USD pairs at risk — spreads spike at release.</small></div>
+</div>
+<?php elseif ($mFomc['is_tomorrow']): ?>
+<div class="risk-alert risk-alert-warning mb-3">
+    <i class="fas fa-triangle-exclamation fa-lg"></i>
+    <div><strong>⚡ FOMC Tomorrow (<?= $mFomc['next_date'] ?>) — Federal Reserve at 11:30 PM IST</strong><br>
+    <small>Reduce position size today. Big USD move expected tomorrow night.</small></div>
+</div>
+<?php elseif ($mNfp['is_tomorrow']): ?>
+<div class="risk-alert risk-alert-warning mb-3">
+    <i class="fas fa-triangle-exclamation fa-lg"></i>
+    <div><strong>⚡ NFP Tomorrow (<?= $mNfp['next_date'] ?>) — Non-Farm Payrolls at 6:00 PM IST</strong><br>
+    <small>Cut risk on USD pairs today. Close all trades before 5:45 PM IST tomorrow.</small></div>
+</div>
+<?php endif; ?>
+
+<?php /* ── MARKET AWARENESS SECTION ── */ ?>
+<div class="risk-section-header">
+    <i class="fas fa-globe"></i> Market Awareness
+    <span style="font-size:10px;font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0;margin-left:6px;"><?= $mDay['date_str'] ?> &nbsp;·&nbsp; <?= $mDay['time_str'] ?></span>
+</div>
+
+<div class="row g-3 mb-4">
+
+    <?php /* ══ CARD 1: TODAY'S DAY ══ */ ?>
+    <div class="col-12 col-md-4">
+        <div class="ma-card" style="border-top-color:<?= $dc['bar'] ?>;">
+
+            <!-- coloured hero banner -->
+            <div class="ma-hero" style="background:<?= $dc['bg'] ?>;border-bottom:1px solid <?= $dc['border'] ?>;">
+                <div class="ma-hero-icon" style="background:<?= $dc['bg'] ?>;border:2px solid <?= $dc['border'] ?>;">
+                    <i class="fas <?= $mDay['icon'] ?>" style="color:<?= $dc['txt'] ?>;font-size:22px;"></i>
+                </div>
+                <div class="ma-hero-body">
+                    <div class="ma-hero-label">Today's Day</div>
+                    <div class="ma-hero-title" style="color:<?= $dc['txt'] ?>;"><?= $mDay['name'] ?></div>
+                </div>
+                <div class="ma-pill" style="background:<?= $dc['bg'] ?>;color:<?= $dc['txt'] ?>;border:1px solid <?= $dc['border'] ?>;">
+                    <?= $mDay['emoji'] ?> <?= $mDay['rating'] ?>
+                </div>
+            </div>
+
+            <div class="ma-body">
+                <!-- star dots -->
+                <div class="ma-stars-row">
+                    <span class="ma-stars-label">Trading Quality</span>
+                    <div class="ma-dots">
+                        <?php for ($s = 1; $s <= 5; $s++): ?>
+                        <div class="ma-dot <?= $s <= $mDay['stars'] ? 'filled' : 'empty' ?>"
+                             style="<?= $s <= $mDay['stars'] ? "background:{$dc['txt']};" : '' ?>"></div>
+                        <?php endfor; ?>
+                    </div>
+                    <span class="ma-stars-score" style="color:<?= $dc['txt'] ?>;"><?= $mDay['stars'] ?>/5</span>
+                </div>
+
+                <p class="ma-tip-text"><?= $mDay['tip'] ?></p>
+
+                <div class="ma-advice-box" style="background:<?= $dc['bg'] ?>;border-left:3px solid <?= $dc['txt'] ?>;">
+                    <i class="fas fa-lightbulb" style="color:<?= $dc['txt'] ?>;margin-right:6px;"></i><?= $mDay['advice'] ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?php /* ══ CARD 2: SESSION STATUS ══ */ ?>
+    <div class="col-12 col-md-4">
+        <div class="ma-card" style="border-top-color:<?= $sc['bar'] ?>;">
+
+            <!-- hero banner -->
+            <div class="ma-hero" style="background:<?= $sc['bg'] ?>;border-bottom:1px solid <?= $sc['border'] ?>;">
+                <div class="ma-hero-icon" style="background:<?= $sc['bg'] ?>;border:2px solid <?= $sc['border'] ?>;">
+                    <i class="fas <?= $mSess['icon'] ?>" style="color:<?= $sc['txt'] ?>;font-size:22px;"></i>
+                </div>
+                <div class="ma-hero-body">
+                    <div class="ma-hero-label">Session Now</div>
+                    <div class="ma-hero-title" style="color:<?= $sc['txt'] ?>;"><?= $mSess['name'] ?></div>
+                </div>
+                <?php if ($mSess['active']): ?>
+                <div class="ma-pill" style="background:<?= $sc['bg'] ?>;color:<?= $sc['txt'] ?>;border:1px solid <?= $sc['border'] ?>;">
+                    <span class="ma-live-dot" style="background:<?= $sc['txt'] ?>;"></span>LIVE
+                </div>
+                <?php else: ?>
+                <div class="ma-pill" style="background:var(--bg-elevated);color:var(--text-muted);border:1px solid var(--border);">CLOSED</div>
+                <?php endif; ?>
+            </div>
+
+            <div class="ma-body">
+                <!-- time block -->
+                <div class="ma-time-block" style="background:<?= $sc['bg'] ?>;border:1px solid <?= $sc['border'] ?>;">
+                    <i class="fas fa-clock" style="color:<?= $sc['txt'] ?>;font-size:13px;"></i>
+                    <span class="ma-time-text" style="color:<?= $sc['txt'] ?>;"><?= $mSess['time_ist'] ?></span>
+                </div>
+
+                <p class="ma-tip-text"><?= $mSess['tip'] ?></p>
+
+                <?php if ($mSess['best']): ?>
+                <div class="ma-advice-box" style="background:rgba(22,163,74,.1);border-left:3px solid #16a34a;color:#16a34a;font-weight:600;">
+                    <i class="fas fa-fire" style="margin-right:6px;"></i>Prime time — highest volume of the day!
+                </div>
+                <?php elseif (!$mSess['active']): ?>
+                <div class="ma-advice-box" style="background:<?= $sc['bg'] ?>;border-left:3px solid <?= $sc['txt'] ?>;">
+                    <i class="fas fa-lightbulb" style="color:<?= $sc['txt'] ?>;margin-right:6px;"></i>London opens 12:30 PM · Best: 6:30–10:30 PM IST
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <?php /* ══ CARD 3: UPCOMING EVENTS ══ */ ?>
+    <div class="col-12 col-md-4">
+        <div class="ma-card" style="border-top-color:<?= $pc['bar'] ?>;">
+
+            <div class="ma-hero" style="background:<?= $pc['bg'] ?>;border-bottom:1px solid <?= $pc['border'] ?>;">
+                <div class="ma-hero-icon" style="background:<?= $pc['bg'] ?>;border:2px solid <?= $pc['border'] ?>;">
+                    <i class="fas fa-calendar-alt" style="color:<?= $pc['txt'] ?>;font-size:22px;"></i>
+                </div>
+                <div class="ma-hero-body">
+                    <div class="ma-hero-label">Upcoming Events</div>
+                    <div class="ma-hero-title" style="color:<?= $pc['txt'] ?>;">Market Calendar</div>
+                </div>
+            </div>
+
+            <div class="ma-body">
+
+                <?php
+                // FOMC
+                $fC = $mFomc['is_today'] ? $maColors['loss'] : ($mFomc['is_this_week'] ? $maColors['warn'] : $maColors['muted']);
+                ?>
+                <div class="ma-event">
+                    <div class="ma-event-icon-box" style="background:<?= $fC['bg'] ?>;border:1px solid <?= $fC['border'] ?>;">
+                        <i class="fas fa-landmark" style="color:<?= $fC['txt'] ?>;font-size:13px;"></i>
+                    </div>
+                    <div class="ma-event-info">
+                        <div class="ma-event-name">
+                            FOMC — Fed Rate Decision
+                            <?php if ($mFomc['is_today']): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['loss']['bg'] ?>;color:<?= $maColors['loss']['txt'] ?>;">TODAY</span>
+                            <?php elseif ($mFomc['is_tomorrow']): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['warn']['bg'] ?>;color:<?= $maColors['warn']['txt'] ?>;">TOMORROW</span>
+                            <?php elseif ($mFomc['is_this_week']): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['warn']['bg'] ?>;color:<?= $maColors['warn']['txt'] ?>;">THIS WEEK</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="ma-event-meta">
+                            <?= $mFomc['next_date'] ?>
+                            <?php if ($mFomc['is_today']): ?>
+                                &nbsp;·&nbsp; 11:30 PM IST
+                            <?php else: ?>
+                                &nbsp;·&nbsp; <strong style="color:<?= $fC['txt'] ?>;"><?= $mFomc['days_away'] ?> days</strong> away
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <?php
+                // NFP
+                $nC = $mNfp['is_today'] ? $maColors['loss'] : ($mNfp['is_this_week'] ? $maColors['warn'] : $maColors['muted']);
+                ?>
+                <div class="ma-event">
+                    <div class="ma-event-icon-box" style="background:<?= $nC['bg'] ?>;border:1px solid <?= $nC['border'] ?>;">
+                        <i class="fas fa-briefcase" style="color:<?= $nC['txt'] ?>;font-size:13px;"></i>
+                    </div>
+                    <div class="ma-event-info">
+                        <div class="ma-event-name">
+                            NFP — Non-Farm Payrolls
+                            <?php if ($mNfp['is_today']): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['loss']['bg'] ?>;color:<?= $maColors['loss']['txt'] ?>;">TODAY</span>
+                            <?php elseif ($mNfp['is_tomorrow']): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['warn']['bg'] ?>;color:<?= $maColors['warn']['txt'] ?>;">TOMORROW</span>
+                            <?php elseif ($mNfp['is_this_week']): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['warn']['bg'] ?>;color:<?= $maColors['warn']['txt'] ?>;">THIS WEEK</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="ma-event-meta">
+                            <?= $mNfp['next_date'] ?>
+                            <?php if ($mNfp['is_today']): ?>
+                                &nbsp;·&nbsp; 6:00 PM IST
+                            <?php else: ?>
+                                &nbsp;·&nbsp; <strong style="color:<?= $nC['txt'] ?>;"><?= $mNfp['days_away'] ?> days</strong> away
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <?php if ($mDay['dow'] === 3 || $mDay['dow'] === 4):
+                    $jC = ($mDay['dow'] === 4) ? $maColors['loss'] : $maColors['blue'];
+                ?>
+                <div class="ma-event" style="border-bottom:none;padding-bottom:0;">
+                    <div class="ma-event-icon-box" style="background:<?= $jC['bg'] ?>;border:1px solid <?= $jC['border'] ?>;">
+                        <i class="fas fa-users" style="color:<?= $jC['txt'] ?>;font-size:13px;"></i>
+                    </div>
+                    <div class="ma-event-info">
+                        <div class="ma-event-name">
+                            US Jobless Claims
+                            <?php if ($mDay['dow'] === 4): ?>
+                                <span class="ma-tag" style="background:<?= $maColors['loss']['bg'] ?>;color:<?= $maColors['loss']['txt'] ?>;">TODAY</span>
+                            <?php else: ?>
+                                <span class="ma-tag" style="background:<?= $maColors['blue']['bg'] ?>;color:<?= $maColors['blue']['txt'] ?>;">TOMORROW</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="ma-event-meta">Every Thursday &nbsp;·&nbsp; 6:00 PM IST</div>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+            </div>
+        </div>
+    </div>
+
+</div><!-- /row market awareness -->
 
 <!-- SECTION 1: ACCOUNT OVERVIEW -->
 <div class="risk-section-header"><i class="fas fa-wallet"></i> Account Overview</div>

@@ -1114,3 +1114,498 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; 
 /* -- Capital cycle shortcut active state -- */
 .az-shortcut.cycle-active { background: var(--accent); color: #fff !important; border-color: var(--accent); }
 
+/* ============================================================
+   SMART MONEY GUIDE PAGE
+   ============================================================ */
+
+/* ── Today Snapshot Banner ── */
+.sm-snapshot {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+}
+@media (max-width: 900px) { .sm-snapshot { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px) { .sm-snapshot { grid-template-columns: 1fr; } }
+
+.sm-snap-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    box-shadow: var(--shadow-sm);
+}
+.sm-snap-icon {
+    width: 38px; height: 38px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+}
+.sm-snap-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px;
+}
+.sm-snap-val { font-size: 14px; font-weight: 700; line-height: 1.2; margin-bottom: 2px; }
+.sm-snap-sub { font-size: 10px; color: var(--text-muted); }
+.sm-live-badge {
+    display: inline-block; font-size: 8px; font-weight: 800;
+    padding: 1px 6px; border-radius: 4px;
+    background: rgba(22,163,74,.15); color: #16a34a;
+    margin-left: 4px; vertical-align: middle; letter-spacing: .06em;
+}
+
+/* ── Players Grid ── */
+.sm-players-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+}
+@media (max-width: 1100px) { .sm-players-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px)  { .sm-players-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.sm-player-card {
+    text-align: center;
+    padding: 16px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: transform .2s;
+}
+.sm-player-card:hover { transform: translateY(-2px); }
+.sm-player-icon {
+    width: 48px; height: 48px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; margin: 0 auto 10px;
+}
+.sm-player-name  { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.sm-player-type  { font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; }
+.sm-player-fact  { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Session Timeline ── */
+.sm-timeline { overflow-x: auto; }
+.sm-tl-bar {
+    display: flex;
+    height: 52px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    min-width: 480px;
+}
+.sm-tl-seg {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+    letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-secondary);
+    gap: 2px; padding: 4px 2px;
+    text-align: center;
+}
+.sm-tl-seg.sm-tl-best { color: #16a34a; font-weight: 800; }
+.sm-tl-time { font-size: 8px; font-weight: 500; opacity: .8; }
+.sm-tl-labels {
+    display: flex; justify-content: space-between;
+    margin-top: 6px; padding: 0 2px;
+    font-size: 9px; color: var(--text-muted);
+    min-width: 480px;
+}
+
+/* ── Session card rows ── */
+.sm-sess-row {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 5px 0; border-bottom: 1px solid var(--border-light);
+    gap: 8px;
+}
+.sm-sess-row:last-of-type { border-bottom: none; }
+.sm-sess-key { font-size: 10px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; flex-shrink: 0; }
+.sm-sess-val { font-size: 11px; color: var(--text-secondary); text-align: right; }
+
+/* ── Do / Don't boxes ── */
+.sm-do-dont { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.sm-do {
+    font-size: 10px; padding: 5px 8px; border-radius: 5px;
+    background: rgba(22,163,74,.1); color: #16a34a; font-weight: 600;
+    display: flex; align-items: flex-start; gap: 6px; line-height: 1.45;
+}
+.sm-dont {
+    font-size: 10px; padding: 5px 8px; border-radius: 5px;
+    background: rgba(220,38,38,.1); color: #dc2626; font-weight: 600;
+    display: flex; align-items: flex-start; gap: 6px; line-height: 1.45;
+}
+.sm-do i, .sm-dont i { flex-shrink: 0; margin-top: 1px; }
+
+/* ── Day of Week Grid ── */
+.sm-days-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 10px;
+}
+@media (max-width: 1100px) { .sm-days-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 600px)  { .sm-days-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.sm-day-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    position: relative;
+    transition: transform .2s;
+}
+.sm-day-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.sm-day-today { box-shadow: 0 0 0 2px var(--accent); }
+
+.sm-today-banner {
+    font-size: 8px; font-weight: 800; letter-spacing: .1em;
+    text-align: center; padding: 3px; text-transform: uppercase;
+}
+.sm-day-header {
+    padding: 10px 10px 8px;
+    display: flex; flex-direction: column; gap: 4px;
+}
+.sm-day-icon { font-size: 18px; }
+.sm-day-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.sm-day-badge {
+    display: inline-block; font-size: 8px; font-weight: 800;
+    padding: 2px 7px; border-radius: 4px; letter-spacing: .06em; text-transform: uppercase;
+}
+.sm-day-stars { display: flex; gap: 3px; margin-top: 2px; }
+.sm-star { width: 8px; height: 8px; border-radius: 50%; }
+.sm-star.off { background: var(--border); }
+
+.sm-day-body { padding: 8px 10px 10px; }
+.sm-day-tip { font-size: 10px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 6px; }
+
+/* ── Concept / SMC Cards ── */
+.sm-code-box {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+}
+.sm-rule-box {
+    padding: 8px 10px;
+    border-radius: 6px;
+    display: flex; align-items: flex-start; gap: 2px;
+}
+
+/* ── Pair Cards ── */
+.sm-pair-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 12px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    transition: transform .2s;
+    height: 100%;
+}
+.sm-pair-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.sm-pair-flag { font-size: 28px; margin-bottom: 6px; line-height: 1; }
+.sm-pair-name { font-family: var(--font-mono); font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+.sm-pair-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; color: var(--text-muted);
+    padding: 3px 0; border-bottom: 1px solid var(--border-light);
+    gap: 4px;
+}
+.sm-pair-meta span:first-child { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.sm-pair-vol { font-size: 12px; color: #f59e0b; margin: 8px 0 4px; letter-spacing: 1px; }
+.sm-pair-tip { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Checklist ── */
+.sm-check-item {
+    border-bottom: 1px solid var(--border-light);
+    padding: 8px 0;
+    transition: opacity .2s;
+}
+.sm-check-item:last-of-type { border-bottom: none; }
+.sm-check-item.done { opacity: .5; }
+.sm-check-label {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; user-select: none;
+}
+.sm-checkbox { display: none; }
+.sm-check-box {
+    width: 18px; height: 18px; border-radius: 5px;
+    border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all .15s; background: var(--bg-elevated);
+}
+.sm-checkbox:checked + .sm-check-box {
+    background: var(--profit); border-color: var(--profit);
+}
+.sm-checkbox:checked + .sm-check-box::after {
+    content: '✓'; font-size: 11px; color: #fff; font-weight: 700;
+}
+.sm-cat-tag {
+    font-size: 8px; font-weight: 800; padding: 2px 7px;
+    border-radius: 4px; letter-spacing: .06em; text-transform: uppercase; flex-shrink: 0;
+}
+.sm-check-q { font-size: 12px; color: var(--text-primary); line-height: 1.4; }
+.sm-check-warn {
+    font-size: 10px; color: var(--warning); margin: 4px 0 0 26px;
+    display: none; line-height: 1.4;
+}
+
+/* Score bar */
+.sm-score-bar { margin-top: 16px; }
+.sm-score-label {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;
+}
+.sm-score-track {
+    height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;
+}
+.sm-score-fill {
+    height: 100%; border-radius: 4px;
+    background: var(--loss); width: 0%;
+    transition: width .4s ease, background .4s ease;
+}
+.sm-score-msg { font-size: 11px; margin-top: 6px; font-weight: 600; }
+
+/* ── Golden Rules list ── */
+.sm-rule-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 9px 0; border-bottom: 1px solid var(--border-light);
+}
+.sm-rule-item:last-child { border-bottom: none; }
+.sm-rule-num {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; flex-shrink: 0;
+}
+.sm-rule-content { flex: 1; }
+.sm-rule-title { font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.sm-rule-sub { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Quick Reference Grid ── */
+.sm-ref-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+}
+@media (max-width: 900px) { .sm-ref-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px) { .sm-ref-grid { grid-template-columns: 1fr; } }
+
+.sm-ref-header {
+    font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+    padding: 6px 10px; border-radius: 6px; margin-bottom: 10px;
+}
+.sm-ref-item {
+    display: flex; align-items: flex-start; gap: 7px;
+    font-size: 11px; color: var(--text-secondary);
+    padding: 4px 0; border-bottom: 1px solid var(--border-light); line-height: 1.4;
+}
+.sm-ref-item:last-child { border-bottom: none; }
+.sm-ref-item.best { font-weight: 700; color: var(--text-primary); }
+.sm-ref-item i { margin-top: 2px; flex-shrink: 0; }
+
+/* ============================================================
+   MARKET AWARENESS WIDGET — v2 (Rich Card Design)
+   ============================================================ */
+
+/* ── Base card — mirrors .stat-card ── */
+.ma-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--border); /* overridden inline per-card */
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    transition: transform .2s, box-shadow .2s;
+}
+.ma-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+/* ── Hero banner (coloured top section) ── */
+.ma-hero {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+}
+.ma-hero-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.ma-hero-body {
+    flex: 1;
+    min-width: 0;
+}
+.ma-hero-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+.ma-hero-title {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -.3px;
+}
+
+/* ── Pill badge (rating / LIVE / CLOSED) ── */
+.ma-pill {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+/* ── Card body ── */
+.ma-body {
+    padding: 14px 16px 16px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ── Star quality dots ── */
+.ma-stars-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.ma-stars-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-right: 2px;
+}
+.ma-dots {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+.ma-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.ma-dot.empty { background: var(--border); }
+.ma-stars-score {
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 2px;
+}
+
+/* ── Tip text ── */
+.ma-tip-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* ── Advice box ── */
+.ma-advice-box {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    margin-top: auto;
+}
+
+/* ── Session time block ── */
+.ma-time-block {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+}
+.ma-time-text {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -.1px;
+}
+
+/* ── Pulsing LIVE dot ── */
+.ma-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    animation: ma-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ma-pulse {
+    0%, 100% { opacity: 1;   transform: scale(1);    }
+    50%       { opacity: .35; transform: scale(.6); }
+}
+
+/* ── Event rows (Calendar card) ── */
+.ma-event {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+.ma-event:last-child { border-bottom: none; padding-bottom: 0; }
+.ma-event-icon-box {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.ma-event-info { flex: 1; min-width: 0; }
+.ma-event-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.35;
+    margin-bottom: 3px;
+}
+.ma-event-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* ── Urgency tag pill ── */
+.ma-tag {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-left: 5px;
+    vertical-align: middle;
+    text-transform: uppercase;
+}
+

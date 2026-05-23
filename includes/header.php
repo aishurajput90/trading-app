@@ -100,6 +100,11 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         <a href="<?= $rootPath ?? '' ?>pages/targets.php" class="nav-item <?= $currentPage === 'targets' ? 'active' : '' ?>">
             <i class="fas fa-bullseye"></i><span>Targets</span>
         </a>
+        <div style="margin:12px 16px 4px;border-top:1px solid rgba(255,255,255,.07)"></div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;padding:4px 20px 2px">Market Intel</div>
+        <a href="<?= $rootPath ?? '' ?>pages/smartmoney.php" class="nav-item <?= $currentPage === 'smartmoney' ? 'active' : '' ?>">
+            <i class="fas fa-building-columns"></i><span>Smart Money Guide</span>
+        </a>
         <div style="margin:12px 16px;border-top:1px solid rgba(255,255,255,.07)"></div>
         <a href="<?= $rootPath ?? '' ?>demo/index.php" class="nav-item" style="background:linear-gradient(135deg,rgba(124,58,237,.12),rgba(37,99,235,.12));border:1px solid rgba(124,58,237,.25);margin:4px 12px;border-radius:8px;padding:10px 14px">
             <i class="fas fa-flask-vial" style="color:var(--accent-purple)"></i><span style="font-weight:700">Demo Trading</span>
