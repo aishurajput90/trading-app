@@ -26,7 +26,7 @@ $indiaBalance = getIndiaBalance();
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <link href="<?= $rootPath ?? '' ?>assets/css/style.css" rel="stylesheet">
-    <script>(function(){ var t=localStorage.getItem('tl_theme')||'light'; document.documentElement.setAttribute('data-theme',t); })();</script>
+    <script>(function(){ var t=localStorage.getItem('dos_theme')||'light'; document.documentElement.setAttribute('data-theme',t); })();</script>
 </head>
 <body>
 
@@ -36,7 +36,7 @@ $indiaBalance = getIndiaBalance();
             <span style="font-size:16px">🇮🇳</span>
         </div>
         <div class="brand-text">
-            <span class="brand-name">TradeLog Pro</span>
+            <span class="brand-name">DisciplineOS</span>
             <span class="brand-sub">India Market</span>
         </div>
     </div>

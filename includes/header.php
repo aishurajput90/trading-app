@@ -15,7 +15,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
     <script>
         // Apply theme before paint to avoid flash
         (function(){
-            var t = localStorage.getItem('tl_theme') || 'light';
+            var t = localStorage.getItem('dos_theme') || 'light';
             document.documentElement.setAttribute('data-theme', t);
         })();
     </script>
@@ -62,6 +62,9 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         <a href="<?= $rootPath ?? '' ?>pages/brokerage.php" class="nav-item <?= $currentPage === 'brokerage' ? 'active' : '' ?>">
             <i class="fas fa-hand-holding-dollar"></i><span>Brokerage</span>
         </a>
+        <a href="<?= $rootPath ?? '' ?>pages/risk_settings.php" class="nav-item <?= $currentPage === 'risk_settings' ? 'active' : '' ?>">
+            <i class="fas fa-shield-halved"></i><span>Risk Settings</span>
+        </a>
         <div style="margin:12px 16px 4px;border-top:1px solid rgba(255,255,255,.07)"></div>
         <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;padding:4px 20px 2px">Coaching</div>
         <a href="<?= $rootPath ?? '' ?>pages/coach.php" class="nav-item <?= $currentPage === 'coach' ? 'active' : '' ?>" style="<?= $currentPage === 'coach' ? '' : 'opacity:.92' ?>">
@@ -105,13 +108,21 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         <a href="<?= $rootPath ?? '' ?>pages/smartmoney.php" class="nav-item <?= $currentPage === 'smartmoney' ? 'active' : '' ?>">
             <i class="fas fa-building-columns"></i><span>Smart Money Guide</span>
         </a>
+        <?php if (isAdmin()): ?>
         <div style="margin:12px 16px;border-top:1px solid rgba(255,255,255,.07)"></div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:rgba(250,204,21,.7);text-transform:uppercase;padding:4px 20px 2px">
+            <i class="fas fa-shield-halved me-1" style="color:rgba(250,204,21,.7)"></i>Admin Only
+        </div>
+        <a href="<?= $rootPath ?? '' ?>pages/admin.php" class="nav-item <?= $currentPage === 'admin' ? 'active' : '' ?>" style="margin:2px 12px;border-radius:8px">
+            <i class="fas fa-chart-line" style="color:rgba(250,204,21,.8)"></i><span style="font-weight:700">User Analytics</span>
+        </a>
         <a href="<?= $rootPath ?? '' ?>demo/index.php" class="nav-item" style="background:linear-gradient(135deg,rgba(124,58,237,.12),rgba(37,99,235,.12));border:1px solid rgba(124,58,237,.25);margin:4px 12px;border-radius:8px;padding:10px 14px">
             <i class="fas fa-flask-vial" style="color:var(--accent-purple)"></i><span style="font-weight:700">Demo Trading</span>
         </a>
         <a href="<?= $rootPath ?? '' ?>india/index.php" class="nav-item" style="background:linear-gradient(135deg,rgba(255,153,51,.12),rgba(19,136,8,.12));border:1px solid rgba(255,153,51,.25);margin:4px 12px;border-radius:8px;padding:10px 14px">
             <span style="font-size:16px;margin-right:2px">🇮🇳</span><span style="font-weight:700">India Market</span>
         </a>
+        <?php endif; ?>
     </nav>
 
     <div class="sidebar-footer">
@@ -180,6 +191,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                     'psych_daily'      => 'Daily Discipline Entry',
                     'psych_analytics'  => 'Psychology Analytics',
                     'targets'          => 'Trading Targets',
+                    'risk_settings'    => 'Risk Settings',
                 ];
                 echo $titles[$currentPage] ?? 'Dashboard';
                 ?>
@@ -199,10 +211,23 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                 <i class="fas fa-moon" id="themeIconMoon"></i>
             </div>
 
-            <div class="user-chip">
-                <div class="user-avatar">DT</div>
-                <span>Demo Trader</span>
+            <?php
+            $__loggedUser = getLoggedInUser();
+            $__uname      = $__loggedUser['name'] ?? ($_SESSION['user_name'] ?? 'User');
+            $__words      = array_filter(explode(' ', $__uname));
+            $__initials   = strtoupper(implode('', array_map(fn($w) => $w[0], $__words)));
+            $__initials   = substr($__initials, 0, 2);
+            ?>
+            <div class="user-chip" style="cursor:pointer" title="Account Settings"
+                 onclick="window.location='<?= $rootPath ?? '' ?>pages/account.php'">
+                <div class="user-avatar"><?= htmlspecialchars($__initials) ?></div>
+                <span><?= htmlspecialchars($__uname) ?></span>
             </div>
+            <a href="<?= $rootPath ?? '' ?>pages/logout.php"
+               class="btn-icon ms-1" title="Logout"
+               onclick="return confirm('Log out of <?= APP_NAME ?>?')">
+                <i class="fas fa-right-from-bracket"></i>
+            </a>
         </div>
     </header>
 

@@ -1,4 +1,4 @@
-# TradeLog Pro — Trading Journal & Risk Management App
+# DisciplineOS — Trading Journal & Risk Management App
 ## XAMPP Setup Guide
 
 ---
@@ -156,7 +156,7 @@ define('WEEKLY_DRAWDOWN_LIMIT', 6.0);  // 6% weekly rule
 Edit `WEEKLY_DRAWDOWN_LIMIT` in `config/db.php`
 
 **Change default theme:**
-Edit `localStorage.getItem('tl_theme') || 'light'` in `header.php` to `'dark'`
+Edit `localStorage.getItem('dos_theme') || 'light'` in `header.php` to `'dark'`
 
 **Change accent color:**
 Edit `--accent: #2563eb;` in `assets/css/style.css`

@@ -1,8 +1,10 @@
 <?php
 require_once '../config/db.php';
+requireLogin();
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+$userId = getCurrentUserId();
 $msg    = ''; $msgType = '';
+if (!empty($_POST)) validateCsrfOrDie();
 
 // ── Scoring Engine ────────────────────────────────────────────────────────────
 function calculatePOVScore(array $entry, array $outcome): array {
@@ -347,6 +349,7 @@ include '../includes/header.php';
             </div>
             <div class="panel-body">
                 <form method="POST" id="povForm">
+                    <?= csrfField() ?>
                     <input type="hidden" name="action" value="new_pov">
 
                     <div class="row g-2 mb-3">
@@ -541,6 +544,7 @@ include '../includes/header.php';
                             <i class="fas fa-flask"></i> Analyze Outcome
                         </button>
                         <form method="POST" style="display:inline" onsubmit="return confirm('Delete this POV?')">
+                    <?= csrfField() ?>
                             <input type="hidden" name="action" value="delete_pov">
                             <input type="hidden" name="pov_id" value="<?= $pov['id'] ?>">
                             <button type="submit" class="btn-del-pov"><i class="fas fa-trash"></i></button>
@@ -741,6 +745,7 @@ include '../includes/header.php';
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST">
+                    <?= csrfField() ?>
                 <input type="hidden" name="action" value="analyze_pov">
                 <input type="hidden" name="pov_id" id="modalPovId">
                 <div class="modal-body">

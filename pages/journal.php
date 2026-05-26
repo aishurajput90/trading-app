@@ -1,7 +1,9 @@
 <?php
 require_once '../config/db.php';
 $db      = getDB();
-$userId  = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 $msg     = '';
 $msgType = '';
 

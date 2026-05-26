@@ -3,7 +3,8 @@ require_once '../config/db.php';
 require_once '../includes/psych_helpers.php';
 $pageTitle = 'Psychology Analytics';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 $today     = date('Y-m-d');
 $db        = getDB();
 

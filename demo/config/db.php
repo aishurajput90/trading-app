@@ -1,7 +1,7 @@
 <?php
 require_once dirname(__DIR__, 2) . '/config/db.php';
 
-define('DEMO_APP_NAME', 'TradeLog Pro — Demo');
+define('DEMO_APP_NAME', 'DisciplineOS — Demo');
 define('DEMO_USER_ID',  DEFAULT_USER_ID);
 
 // Active account (can be switched via session)

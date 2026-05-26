@@ -1,10 +1,10 @@
 /* ============================================================
-   TradeLog Pro - app.js
+   DisciplineOS - app.js
    Dark/Light Mode | Sidebar | Charts | Modal Helpers
    ============================================================ */
 
 /* ---------- THEME TOGGLE ---------- */
-const THEME_KEY = 'tl_theme';
+const THEME_KEY = 'dos_theme';
 
 function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);

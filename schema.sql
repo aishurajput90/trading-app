@@ -13,7 +13,14 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(150) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     initial_balance DECIMAL(15,2) DEFAULT 10000.00,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    role           ENUM('user','admin') NOT NULL DEFAULT 'user',
+    last_login_at  DATETIME  DEFAULT NULL,
+    last_active_at DATETIME  DEFAULT NULL,
+    login_count    INT       NOT NULL DEFAULT 0,
+    signup_ip      VARCHAR(45) DEFAULT NULL,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_last_active (last_active_at),
+    INDEX idx_last_login  (last_login_at)
 );
 
 -- Trades table (v2 - uses DATETIME)
@@ -551,4 +558,16 @@ CREATE TABLE IF NOT EXISTS psych_trade_quality (
     notes             TEXT DEFAULT NULL,
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_ptq_user_date (user_id, entry_date)
+);
+
+-- Password reset tokens
+CREATE TABLE IF NOT EXISTS password_resets (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    email      VARCHAR(150) NOT NULL,
+    token      VARCHAR(64)  NOT NULL UNIQUE,
+    expires_at DATETIME     NOT NULL,
+    used       TINYINT(1)   NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_pr_email (email),
+    INDEX idx_pr_token (token)
 );

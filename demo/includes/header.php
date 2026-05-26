@@ -20,7 +20,7 @@ $allAccounts = $allAccounts->fetchAll();
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <link href="<?= $rootPath ?? '' ?>assets/css/style.css" rel="stylesheet">
-    <script>(function(){var t=localStorage.getItem('tl_theme')||'light';document.documentElement.setAttribute('data-theme',t);})();</script>
+    <script>(function(){var t=localStorage.getItem('dos_theme')||'light';document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
 <body>
 

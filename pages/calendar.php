@@ -1,7 +1,8 @@
 <?php
 require_once '../config/db.php';
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 
 $month = intval($_GET['month'] ?? date('n'));
 $year  = intval($_GET['year']  ?? date('Y'));

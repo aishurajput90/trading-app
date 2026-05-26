@@ -1,6 +1,7 @@
 <?php
 require_once '../config/db.php';
-$cycles    = getCapitalCycles(DEFAULT_USER_ID);
+requireLogin();
+$cycles    = getCapitalCycles(getCurrentUserId());
 $pageTitle = 'Capital Cycles';
 $rootPath  = '../';
 include '../includes/header.php';

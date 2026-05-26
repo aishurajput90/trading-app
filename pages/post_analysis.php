@@ -2,7 +2,9 @@
 require_once '../config/db.php';
 $pageTitle = 'Post-Trade Review';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 $today     = date('Y-m-d');
 $db        = getDB();
 
@@ -135,6 +137,7 @@ $showForm   = !$record || isset($_GET['reset']);
                 </a>
                 <?php endif; ?>
                 <form method="POST" style="display:inline" onsubmit="return confirm('Delete this day\'s record permanently?')">
+                    <?= csrfField() ?>
                     <input type="hidden" name="action"      value="delete">
                     <input type="hidden" name="target_date" value="<?= $targetDate ?>">
                     <button type="submit" class="btn btn-outline-danger btn-sm">
@@ -233,6 +236,7 @@ $showForm   = !$record || isset($_GET['reset']);
     <?php else: ?>
     <!-- Form (new or edit) -->
     <form method="POST">
+                    <?= csrfField() ?>
         <input type="hidden" name="target_date" value="<?= $targetDate ?>">
 
         <!-- Scores -->

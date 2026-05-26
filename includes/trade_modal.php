@@ -15,6 +15,7 @@
             </div>
 
             <form method="POST" id="tradeForm">
+                <?= csrfField() ?>
                 <input type="hidden" name="action" value="add" id="formAction">
                 <input type="hidden" name="id" id="trade_id">
 
@@ -308,7 +309,7 @@ document.getElementById('swap')?.addEventListener('input', updateNetPL);
 
 // ---- R:R ratio + risk % check ----
 const MAX_RISK_PCT = <?= defined('MAX_RISK_PER_TRADE_PCT') ? MAX_RISK_PER_TRADE_PCT : 2.0 ?>;
-const ACCOUNT_BALANCE = <?= defined('DEFAULT_USER_ID') ? 'null' : 'null' ?>; // fetched server-side below
+const ACCOUNT_BALANCE = null; // fetched server-side below
 
 function updateRR() {
     const sl = parseFloat(document.getElementById('sl_amount')?.value) || 0;

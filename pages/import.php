@@ -1,7 +1,9 @@
 <?php
 require_once '../config/db.php';
+requireLogin();
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 
 $msg       = '';
 $msgType   = '';
@@ -190,7 +192,7 @@ include '../includes/header.php';
                 </p>
 
                 <!-- Drag-drop zone -->
-                <div class="import-dropzone" id="dropzone" onclick="document.getElementById('csvPreviewInput').click()">
+                <div class="import-dropzone" id="dropzone">
                     <i class="fas fa-cloud-arrow-up" style="font-size:32px;color:var(--accent);margin-bottom:10px"></i>
                     <div style="font-weight:600;margin-bottom:4px">Drop CSV file here</div>
                     <div style="font-size:12px;color:var(--text-muted)">or click to browse</div>
@@ -199,6 +201,7 @@ include '../includes/header.php';
 
                 <!-- Preview first -->
                 <form method="POST" enctype="multipart/form-data" id="previewForm">
+                    <?= csrfField() ?>
                     <input type="hidden" name="action" value="preview">
                     <input type="file" name="csvfile" id="csvPreviewInput" accept=".csv" style="display:none">
                     <button type="submit" class="btn-secondary-custom w-100 mt-3" id="previewBtn" disabled>
@@ -208,6 +211,7 @@ include '../includes/header.php';
 
                 <!-- Full import -->
                 <form method="POST" enctype="multipart/form-data" id="importForm">
+                    <?= csrfField() ?>
                     <input type="hidden" name="action" value="import">
                     <input type="file" name="csvfile" id="csvImportInput" accept=".csv" style="display:none">
                     <button type="submit" class="btn-primary-custom w-100 mt-2" id="importBtn" disabled>
@@ -271,7 +275,8 @@ include '../includes/header.php';
                 <div class="metric-row"><span class="metric-label">Total Swap</span><span class="metric-value <?= $iStats['total_swap']>=0?'text-profit':'text-loss' ?>"><?= formatPL($iStats['total_swap']) ?></span></div>
                 <div class="metric-row"><span class="metric-label" style="font-weight:700">Net P&amp;L (after charges)</span><span class="metric-value <?= $iStats['net_pl']>=0?'text-profit':'text-loss' ?>" style="font-weight:800;font-size:15px"><?= formatPL($iStats['net_pl']) ?></span></div>
                 <hr class="divider">
-                <form method="POST" onsubmit="return confirm('Delete ALL <?= $importedTotal ?> imported trades? This cannot be undone.')">
+                <form method="POST" onsubmit="return confirm('Delete ALL <?= $importedTotal ?>
+                    <?= csrfField() ?> imported trades? This cannot be undone.')">
                     <input type="hidden" name="action" value="delete_imported">
                     <button type="submit" class="btn-secondary-custom w-100" style="color:var(--loss);border-color:var(--loss)">
                         <i class="fas fa-trash"></i> Remove All Imported Trades

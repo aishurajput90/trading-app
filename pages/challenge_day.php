@@ -4,7 +4,8 @@ require_once '../includes/challenge_helpers.php';
 
 $pageTitle = 'Daily Challenge Entry';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 $db        = getDB();
 $today     = date('Y-m-d');
 $msg       = '';
@@ -36,6 +37,7 @@ foreach ($allDaysRaw as $d) $dayMap[$d['day_date']] = $d;
 
 // POST handler
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    validateCsrfOrDie();
     $checkFields = ['check_higher_tf','check_key_levels','check_confirmation','check_risk_mgmt','check_no_revenge','check_setup_only','check_stop_loss','check_calm'];
     $checks = [];
     foreach ($checkFields as $f) $checks[$f] = isset($_POST[$f]) ? 1 : 0;
@@ -156,6 +158,7 @@ include '../includes/header.php';
 <?php endif; ?>
 
 <form method="POST" id="dayForm">
+                    <?= csrfField() ?>
 
 <!-- Section 1: Pre-trade checklist -->
 <div class="chal-section">

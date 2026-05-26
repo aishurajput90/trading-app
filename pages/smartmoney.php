@@ -1,5 +1,6 @@
 <?php
 require_once '../config/db.php';
+requireLogin();
 require_once '../includes/market_awareness.php';
 
 $market = getMarketAwareness();

@@ -2,7 +2,8 @@
 require_once '../config/db.php';
 $pageTitle = 'Pre-Trade Checklist';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 $today     = date('Y-m-d');
 $db        = getDB();
 
@@ -11,6 +12,7 @@ $saved   = false;
 $errors  = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    validateCsrfOrDie();
     $sleptWell      = isset($_POST['slept_well'])       ? (int)$_POST['slept_well']       : null;
     $emotionallyCalm = isset($_POST['emotionally_calm']) ? (int)$_POST['emotionally_calm'] : null;
     $session        = trim($_POST['trading_session'] ?? '');
@@ -185,6 +187,7 @@ include '../includes/header.php';
         </div>
 
         <form method="POST">
+                    <?= csrfField() ?>
             <!-- Q1 -->
             <div class="check-card">
                 <span class="check-label"><span style="color:var(--accent)">Q1.</span> Did you sleep properly last night?</span>

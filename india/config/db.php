@@ -7,7 +7,7 @@
 require_once dirname(__DIR__, 2) . '/config/db.php'; // reuse main DB connection
 
 // India-specific overrides
-define('INDIA_APP_NAME',    'TradeLog Pro — India');
+define('INDIA_APP_NAME',    'DisciplineOS — India');
 define('INDIA_CURRENCY',    '₹');
 define('INDIA_CURRENCY_CODE','INR');
 define('INDIA_DEFAULT_USER', DEFAULT_USER_ID);

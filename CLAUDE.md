@@ -13,7 +13,7 @@ No build process. Files are served directly by MAMP/XAMPP Apache.
 
 ## Architecture
 
-TradeLog Pro is a server-rendered PHP + MySQL app with no framework or SPA. All state lives in MySQL; the only client-side state is the dark/light theme preference in `localStorage`.
+DisciplineOS is a server-rendered PHP + MySQL app with no framework or SPA. All state lives in MySQL; the only client-side state is the dark/light theme preference in `localStorage`.
 
 **Request flow:**
 1. Browser hits a PHP page (e.g., `pages/journal.php`)
@@ -75,5 +75,5 @@ Snapshots are created with `INSERT IGNORE`, so calling `getRiskMetrics()` multip
 ## Frontend
 
 - **Bootstrap 5.3.2**, **Chart.js 4.4.0**, **Font Awesome 6.5.0** — all via CDN
-- **CSS variables** in `assets/css/style.css` power light/dark themes. Theme is set via `data-theme` attribute on `<html>` and stored in `localStorage` key `tl_theme`.
+- **CSS variables** in `assets/css/style.css` power light/dark themes. Theme is set via `data-theme` attribute on `<html>` and stored in `localStorage` key `dos_theme`.
 - `assets/js/app.js` — theme toggle, sidebar state, modal helpers (auto-fill date/time, live P/L preview)

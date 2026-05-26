@@ -123,6 +123,15 @@ function getWeeklySnapshot(int $userId): array {
  */
 function getRiskMetrics(int $userId): array {
 
+    // -- Load per-user risk settings (fallback to global constants if NULL) --
+    $uRow = getDB()->prepare("SELECT daily_loss_pct, weekly_loss_pct, warning_threshold_pct, profit_lock_mode FROM users WHERE id = ?");
+    $uRow->execute([$userId]);
+    $uCfg = $uRow->fetch() ?: [];
+    $userDailyPct   = isset($uCfg['daily_loss_pct'])        && $uCfg['daily_loss_pct']        !== null ? (float)$uCfg['daily_loss_pct']         : DAILY_LOSS_LIMIT_PCT;
+    $userWeeklyPct  = isset($uCfg['weekly_loss_pct'])       && $uCfg['weekly_loss_pct']        !== null ? (float)$uCfg['weekly_loss_pct']        : WEEKLY_LOSS_LIMIT_PCT;
+    $userWarningPct = isset($uCfg['warning_threshold_pct']) && $uCfg['warning_threshold_pct']  !== null ? (float)$uCfg['warning_threshold_pct']  : WARNING_THRESHOLD_PCT;
+    $userLockMode   = isset($uCfg['profit_lock_mode'])      && $uCfg['profit_lock_mode']       !== null ? (int)$uCfg['profit_lock_mode']         : PROFIT_LOCK_MODE;
+
     // -- Ensure snapshots exist before reading them --
     ensureDailySnapshot($userId);
     ensureWeeklySnapshot($userId);
@@ -137,9 +146,9 @@ function getRiskMetrics(int $userId): array {
     $weeklyInitial = isset($weekly['balance_at_open']) ? (float)$weekly['balance_at_open'] : $currentEquity;
     $highestEquity = isset($daily['highest_equity'])   ? (float)$daily['highest_equity']   : $currentEquity;
 
-    // -- Daily loss limits --
-    $dailyMaxLoss    = $dailyInitial  * (DAILY_LOSS_LIMIT_PCT  / 100);
-    $weeklyMaxLoss   = $weeklyInitial * (WEEKLY_LOSS_LIMIT_PCT / 100);
+    // -- Daily loss limits (use per-user values) --
+    $dailyMaxLoss    = $dailyInitial  * ($userDailyPct  / 100);
+    $weeklyMaxLoss   = $weeklyInitial * ($userWeeklyPct / 100);
 
     // -- Static floors (used for Conservative mode) --
     $staticDailyFloor  = $dailyInitial - $dailyMaxLoss;
@@ -153,10 +162,10 @@ function getRiskMetrics(int $userId): array {
     //    Mode 2 Balanced   : floor = highest_equity - 20% of highest_equity
     //                               but profit cushion = 50% of profit returned
     //    Mode 3 Conservative: floor = daily_initial_balance (fixed — no lock-up benefit)
-    $lockMode = (int)PROFIT_LOCK_MODE;
+    $lockMode = $userLockMode;
     switch ($lockMode) {
         case 1: // Aggressive — trail tightly off peak
-            $dynamicFloor   = $highestEquity - ($highestEquity * (DAILY_LOSS_LIMIT_PCT / 100));
+            $dynamicFloor   = $highestEquity - ($highestEquity * ($userDailyPct / 100));
             $lockModeLabel  = 'Aggressive';
             break;
         case 3: // Conservative — plain fixed floor, no profit benefit
@@ -166,7 +175,7 @@ function getRiskMetrics(int $userId): array {
         default: // 2 — Balanced (default): return 50% of locked profit to cushion
             $cushion        = $profitAboveInitial * 0.50;
             $base           = $highestEquity - $cushion;
-            $dynamicFloor   = $base - ($base * (DAILY_LOSS_LIMIT_PCT / 100));
+            $dynamicFloor   = $base - ($base * ($userDailyPct / 100));
             $lockModeLabel  = 'Balanced';
             break;
     }
@@ -189,8 +198,8 @@ function getRiskMetrics(int $userId): array {
     $breachWeekly = $currentEquity < $weeklyMinEquity;
 
     // -- Warning flags (90% of limit consumed) --
-    $warningDaily  = !$breachDaily  && $dailyLossPctUsed  >= WARNING_THRESHOLD_PCT;
-    $warningWeekly = !$breachWeekly && $weeklyLossPctUsed >= WARNING_THRESHOLD_PCT;
+    $warningDaily  = !$breachDaily  && $dailyLossPctUsed  >= $userWarningPct;
+    $warningWeekly = !$breachWeekly && $weeklyLossPctUsed >= $userWarningPct;
 
     // -- Profit secured: how much equity is "safe" above original daily floor --
     $profitSecured = max(0, $dynamicFloor - $staticDailyFloor);
@@ -249,8 +258,8 @@ function getRiskMetrics(int $userId): array {
         'warning_weekly'           => $warningWeekly,
 
         // Config echoed back (useful for JS)
-        'daily_limit_pct'          => DAILY_LOSS_LIMIT_PCT,
-        'weekly_limit_pct'         => WEEKLY_LOSS_LIMIT_PCT,
+        'daily_limit_pct'          => $userDailyPct,
+        'weekly_limit_pct'         => $userWeeklyPct,
         'lock_mode'                => $lockMode,
         'lock_mode_label'          => $lockModeLabel,
     ];

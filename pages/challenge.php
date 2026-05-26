@@ -4,7 +4,9 @@ require_once '../includes/challenge_helpers.php';
 
 $pageTitle = 'Discipline Challenge';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 $db        = getDB();
 $today     = date('Y-m-d');
 $msg       = '';
@@ -259,6 +261,7 @@ a.chal-cal-cell:hover{transform:scale(1.12);border-color:var(--accent)}
 <div class="chal-card">
     <div style="font-size:1.1rem;font-weight:800;color:var(--text-primary);margin-bottom:20px"><i class="fas fa-flag me-2" style="color:var(--accent)"></i>Start a New Challenge</div>
     <form method="POST">
+                    <?= csrfField() ?>
         <input type="hidden" name="action" value="create_challenge">
 
         <div class="mb-4">
@@ -362,6 +365,7 @@ a.chal-cal-cell:hover{transform:scale(1.12);border-color:var(--accent)}
         <a href="?view=history" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clock-rotate-left me-1"></i>History</a>
         <a href="challenge_report.php?challenge_id=<?= $active['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-file-lines me-1"></i>Report</a>
         <form method="POST" class="d-inline" onsubmit="return confirm('Abandon this challenge? This cannot be undone.')">
+                    <?= csrfField() ?>
             <input type="hidden" name="action" value="abandon_challenge">
             <input type="hidden" name="challenge_id" value="<?= $active['id'] ?>">
             <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-xmark me-1"></i>Abandon</button>

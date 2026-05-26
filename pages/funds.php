@@ -1,7 +1,9 @@
 <?php
 require_once '../config/db.php';
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 $msg    = '';
 $msgType = '';
 
@@ -223,6 +225,7 @@ include '../includes/header.php';
             </div>
             <div class="panel-body">
                 <form method="POST">
+                    <?= csrfField() ?>
                     <div class="mb-3">
                         <label class="form-label">Transaction Type</label>
                         <div class="d-flex gap-2">
@@ -498,6 +501,7 @@ if ($soRows):
                 <button type="button" class="btn-icon" data-bs-dismiss="modal"><i class="fas fa-xmark"></i></button>
             </div>
             <form method="POST">
+                    <?= csrfField() ?>
                 <div class="modal-body">
                     <div class="risk-alert risk-alert-breach mb-3" style="border-radius:var(--radius-sm)">
                         <i class="fas fa-ban"></i>

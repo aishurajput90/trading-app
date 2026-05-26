@@ -2,7 +2,8 @@
 require_once '../config/db.php';
 $pageTitle = 'Improvement Guide';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 $today     = date('Y-m-d');
 $db        = getDB();
 

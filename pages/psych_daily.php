@@ -3,7 +3,8 @@ require_once '../config/db.php';
 require_once '../includes/psych_helpers.php';
 $pageTitle = 'Daily Discipline Entry';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 $today     = date('Y-m-d');
 $db        = getDB();
 
@@ -18,6 +19,7 @@ $isEditingPast = $entryDate !== $today;
 
 // ── POST handler ──────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    validateCsrfOrDie();
     $action = $_POST['action'] ?? '';
 
     if ($action === 'save_daily') {
@@ -331,6 +333,7 @@ include '../includes/header.php';
 <!-- Main Psychology Form -->
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 <form method="POST" id="psychForm">
+                    <?= csrfField() ?>
     <input type="hidden" name="action" value="save_daily">
     <input type="hidden" name="entry_date" value="<?= htmlspecialchars($entryDate) ?>">
 
@@ -518,6 +521,7 @@ include '../includes/header.php';
     </div>
         <div class="collapse" id="tqSection">
             <form method="POST" id="tqForm">
+                    <?= csrfField() ?>
                 <input type="hidden" name="action" value="save_trade_quality">
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">

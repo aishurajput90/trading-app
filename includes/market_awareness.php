@@ -2,7 +2,7 @@
 /**
  * Market Awareness Helper
  * Provides day-of-week intelligence, session status, FOMC countdown, NFP alerts
- * for the TradeLog Pro dashboard widget.
+ * for the DisciplineOS dashboard widget.
  */
 
 // ── 1. DAY OF WEEK ANALYSIS ──────────────────────────────────────────────────

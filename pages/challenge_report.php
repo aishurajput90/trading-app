@@ -4,7 +4,8 @@ require_once '../includes/challenge_helpers.php';
 
 $pageTitle = 'Challenge Report';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 $db        = getDB();
 
 $challengeId = (int)($_GET['challenge_id'] ?? 0);

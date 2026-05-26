@@ -1,9 +1,16 @@
 <?php
-require_once 'config/db.php';  // also loads risk_engine.php
+require_once 'config/db.php';  // also loads risk_engine.php + auth.php
 require_once 'includes/market_awareness.php';
 
+// Show landing page for guests, dashboard for logged-in users
+if (empty($_SESSION['user_id'])) {
+    header('Location: landing.php');
+    exit;
+}
+requireLogin('');
+
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+$userId = getCurrentUserId();
 $today  = date('Y-m-d');
 
 // -- Risk metrics (single call — builds/updates all snapshots) --

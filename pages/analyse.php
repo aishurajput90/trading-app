@@ -7,7 +7,8 @@
 require_once '../config/db.php';
 
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 
 // ── Date range ────────────────────────────────────────────────────────────
 $from     = $_GET['from'] ?? date('Y-m-01');          // default: this month start

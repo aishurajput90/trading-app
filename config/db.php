@@ -6,8 +6,9 @@ define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', 'root');
 define('DB_NAME', 'trading_journal');
-define('APP_NAME', 'TradeLog Pro');
-define('DEFAULT_USER_ID', 1);
+define('APP_NAME', 'DisciplineOS');
+define('APP_DEV', true);           // set false in production
+// NOTE: DEFAULT_USER_ID removed — use getCurrentUserId() in all pages
 define('WEEKLY_DRAWDOWN_LIMIT', 6.0); // legacy — kept for sidebar compatibility
 
 // ---- Risk Engine Configuration (v3) ----
@@ -67,7 +68,8 @@ function formatUSD($value) {
 // so the figure matches the broker's real account balance.
 // Uses the `date` column (user-specified business date) for filtering, not `created_at`
 // (DB insertion time), because those two timestamps can differ when records are entered retroactively.
-function getCurrentBalance($userId = DEFAULT_USER_ID) {
+function getCurrentBalance(int $userId = 0): float {
+    if ($userId === 0) $userId = getCurrentUserId();
     $db = getDB();
 
     // Find the most recent stop out's business date
@@ -108,7 +110,8 @@ function getCurrentBalance($userId = DEFAULT_USER_ID) {
 }
 
 // Helper: get weekly drawdown %
-function getWeeklyDrawdown($userId = DEFAULT_USER_ID) {
+function getWeeklyDrawdown(int $userId = 0): float {
+    if ($userId === 0) $userId = getCurrentUserId();
     $db = getDB();
     $weekStart = date('Y-m-d', strtotime('monday this week'));
     $weekEnd   = date('Y-m-d', strtotime('sunday this week'));
@@ -126,7 +129,8 @@ function getWeeklyDrawdown($userId = DEFAULT_USER_ID) {
 }
 
 // Helper: total brokerage paid in a date range (all time if no range given)
-function getTotalBrokerage(int $userId = DEFAULT_USER_ID, string $from = '', string $to = ''): float {
+function getTotalBrokerage(int $userId = 0, string $from = '', string $to = ''): float {
+    if ($userId === 0) $userId = getCurrentUserId();
     $db = getDB();
     if ($from && $to) {
         $stmt = $db->prepare("SELECT COALESCE(SUM(brokerage),0) as total FROM trades WHERE user_id = ? AND DATE(trade_datetime) BETWEEN ? AND ?");
@@ -139,7 +143,8 @@ function getTotalBrokerage(int $userId = DEFAULT_USER_ID, string $from = '', str
 }
 
 // Helper: net P&L after brokerage + swap (profit_loss - brokerage + swap)
-function getNetPLAfterCharges(int $userId = DEFAULT_USER_ID, string $from = '', string $to = ''): float {
+function getNetPLAfterCharges(int $userId = 0, string $from = '', string $to = ''): float {
+    if ($userId === 0) $userId = getCurrentUserId();
     $db = getDB();
     if ($from && $to) {
         $stmt = $db->prepare("SELECT COALESCE(SUM(profit_loss - brokerage + swap),0) as total FROM trades WHERE user_id = ? AND DATE(trade_datetime) BETWEEN ? AND ?");
@@ -152,7 +157,8 @@ function getNetPLAfterCharges(int $userId = DEFAULT_USER_ID, string $from = '', 
 }
 
 // Returns all capital cycles derived from transactions (stop_out events as boundaries)
-function getCapitalCycles(int $userId = DEFAULT_USER_ID): array {
+function getCapitalCycles(int $userId = 0): array {
+    if ($userId === 0) $userId = getCurrentUserId();
     $db = getDB();
 
     $stmt = $db->prepare("SELECT * FROM transactions WHERE user_id=? ORDER BY date ASC, created_at ASC");
@@ -237,6 +243,9 @@ function getCapitalCycles(int $userId = DEFAULT_USER_ID): array {
 
     return array_reverse($cycles); // newest first
 }
+
+// Load auth middleware (session + requireLogin + CSRF helpers)
+require_once __DIR__ . '/../includes/auth.php';
 
 // Load the risk engine (depends on getDB, getCurrentBalance defined above)
 require_once __DIR__ . '/../includes/risk_engine.php';

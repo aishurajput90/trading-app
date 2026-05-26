@@ -1,7 +1,8 @@
 <?php
 require_once '../config/db.php';
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
 
 $soEventsStmt = $db->prepare("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM transactions WHERE user_id=? AND type='stop_out'");
 $soEventsStmt->execute([$userId]);

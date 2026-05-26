@@ -2,7 +2,9 @@
 require_once '../config/db.php';
 $pageTitle = 'Trading Targets';
 $rootPath  = '../';
-$userId    = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 $db        = getDB();
 $today     = date('Y-m-d');
 
@@ -668,6 +670,7 @@ include '../includes/header.php';
             </div>
             <div class="modal-body" style="padding:24px">
                 <form method="POST" action="targets.php">
+                    <?= csrfField() ?>
                     <input type="hidden" name="action" value="save_targets">
 
                     <!-- P&L Targets -->

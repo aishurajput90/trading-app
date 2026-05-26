@@ -1,7 +1,9 @@
 <?php
 require_once '../config/db.php';
 $db     = getDB();
-$userId = DEFAULT_USER_ID;
+requireLogin();
+$userId = getCurrentUserId();
+if (!empty($_POST)) validateCsrfOrDie();
 
 // ── Validate date param ───────────────────────────────────────────────────
 $date = $_GET['date'] ?? $_POST['date'] ?? date('Y-m-d');
@@ -269,6 +271,7 @@ include '../includes/header.php';
                         Cancel
                     </button>
                     <form method="POST" action="day.php" style="margin:0">
+                    <?= csrfField() ?>
                         <input type="hidden" name="action" value="delete_day">
                         <input type="hidden" name="date"   value="<?= htmlspecialchars($date) ?>">
                         <button type="submit" class="btn btn-danger" style="border-radius:10px;min-width:140px;font-weight:700">
