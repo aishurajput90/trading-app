@@ -263,8 +263,8 @@ if ($hasData) {
     if ($brokPct > 15) {
         $insights[] = ['sev'=>'medium','icon'=>'fas fa-hand-holding-dollar',
             'title' => "Brokerage Consuming {$brokPct}% of Your Gross Profit",
-            'body'  => "Gross P/L was " . ($totalPL >= 0 ? '+' : '') . '$'.number_format($totalPL,2)." but \$".number_format($totalBrok,2)." in commission brought net to " . ($netPL >= 0 ? '+' : '') . '$'.number_format($netPL,2).". Every extra trade you take leaks money regardless of whether it wins.",
-            'pills' => [['l'=>'Gross: $'.number_format($totalPL,2),'c'=>($totalPL>=0?'green':'red')],['l'=>'Brokerage: -$'.number_format($totalBrok,2),'c'=>'red'],['l'=>"{$brokPct}% drag",'c'=>'red']],
+            'body'  => "Gross P/L was " . formatPL($totalPL) . " but " . formatUSD($totalBrok) . " in commission brought net to " . formatPL($netPL) . ". Every extra trade you take leaks money regardless of whether it wins.",
+            'pills' => [['l'=>'Gross: '.formatPL($totalPL),'c'=>($totalPL>=0?'green':'red')],['l'=>'Brokerage: -'.formatUSD($totalBrok),'c'=>'red'],['l'=>"{$brokPct}% drag",'c'=>'red']],
             'fix'   => 'Trade fewer, higher-quality setups. Each trade must have a minimum 1.5× expected value to justify the commission cost.',
         ];
     }
@@ -294,7 +294,7 @@ if ($hasData) {
     if ($lotBuckets['large']['c'] >= 3 && $lotBuckets['large']['wr'] < $lotBuckets['small']['wr'] - 8) {
         $insights[] = ['sev'=>'medium','icon'=>'fas fa-weight-scale',
             'title' => 'Win Rate Drops on Large Lot Sizes',
-            'body'  => "Small lots: {$lotBuckets['small']['wr']}% WR (net \$".number_format($lotBuckets['small']['net'],2)."). Large lots (≥0.5): {$lotBuckets['large']['wr']}% WR (net \$".number_format($lotBuckets['large']['net'],2)."). Larger size creates pressure that leads to premature exits and held losses.",
+            'body'  => "Small lots: {$lotBuckets['small']['wr']}% WR (net ".formatUSD($lotBuckets['small']['net'])."). Large lots (≥0.5): {$lotBuckets['large']['wr']}% WR (net ".formatUSD($lotBuckets['large']['net'])."). Larger size creates pressure that leads to premature exits and held losses.",
             'pills' => [['l'=>"Large WR: {$lotBuckets['large']['wr']}%",'c'=>'red'],['l'=>"Small WR: {$lotBuckets['small']['wr']}%",'c'=>'green'],['l'=>$lotBuckets['large']['c'].' large-lot trades','c'=>'amber']],
             'fix'   => 'Keep lots at 0.1–0.2 until you have 3 consecutive profitable months. Size up only from profit, not capital.',
         ];
@@ -305,7 +305,7 @@ if ($hasData) {
         $insights[] = ['sev'=>'critical','icon'=>'fas fa-skull-crossbones',
             'title' => 'Account Stop-Outs — Margin Blown',
             'body'  => ($soEvents['cnt'] >= 1 ? "Account stopped out {$soEvents['cnt']} time(s) — broker force-closed all positions due to insufficient margin. " : '') . ($soHits >= 2 ? "Additionally {$soHits} individual trades hit stop-out within this period. " : '') . "This is a critical position-sizing failure.",
-            'pills' => [['l'=>"Account SOs: {$soEvents['cnt']}",'c'=>'red'],['l'=>"Trade SOs: {$soHits}",'c'=>'red'],['l'=>'Capital wiped: -$'.number_format($soEvents['total'],2),'c'=>'red']],
+            'pills' => [['l'=>"Account SOs: {$soEvents['cnt']}",'c'=>'red'],['l'=>"Trade SOs: {$soHits}",'c'=>'red'],['l'=>'Capital wiped: -'.formatUSD($soEvents['total']),'c'=>'red']],
             'fix'   => 'Never risk more than 1–2% of account per trade. Maximum 2–3 open positions simultaneously.',
         ];
     }
@@ -341,6 +341,48 @@ if ($hasData) {
     $sevOrder = ['critical'=>0,'high'=>1,'medium'=>2,'low'=>3];
     usort($insights, fn($a,$b) => $sevOrder[$a['sev']] - $sevOrder[$b['sev']]);
 }
+
+// ── Trade Sequence Analysis (cumulative P&L by intraday trade position T1–TN) ──
+$seqDays = [];
+
+if ($hasData) {
+    foreach ($trades as $t) {
+        $date = date('Y-m-d', strtotime($t['trade_datetime']));
+        $net  = round((float)$t['profit_loss'] - (float)$t['brokerage'] + (float)$t['swap'], 2);
+        $seqDays[$date][] = ['net'=>$net, 'symbol'=>$t['symbol'], 'type'=>$t['trade_type']];
+    }
+}
+
+$seqMaxPos    = ($hasData && !empty($seqDays)) ? max(array_map('count', $seqDays)) : 1;
+$seqMaxPos    = max($seqMaxPos, 1);
+$seqPositions = array_fill(1, $seqMaxPos, ['cumPLs'=>[], 'wins'=>0, 'losses'=>0, 'count'=>0]);
+
+if ($hasData) {
+    foreach ($seqDays as $date => &$dayArr) {
+        $cum = 0.0;
+        foreach ($dayArr as $i => &$tr) {
+            $cum       += $tr['net'];
+            $tr['pos']  = $i + 1;
+            $tr['cum']  = round($cum, 2);
+            $p = $i + 1;
+            $seqPositions[$p]['cumPLs'][] = $cum;
+            $seqPositions[$p]['count']++;
+            if ($cum > 0) $seqPositions[$p]['wins']++;
+            else          $seqPositions[$p]['losses']++;
+        }
+        unset($tr);
+    }
+    unset($dayArr);
+}
+
+$seqAvgData = []; $seqWRData = [];
+for ($p = 1; $p <= $seqMaxPos; $p++) {
+    $vals = $seqPositions[$p]['cumPLs'];
+    $seqAvgData[] = count($vals) ? round(array_sum($vals) / count($vals), 2) : null;
+    $seqWRData[]  = $seqPositions[$p]['count'] > 0
+        ? round($seqPositions[$p]['wins'] / $seqPositions[$p]['count'] * 100, 1) : null;
+}
+$seqTableDays = array_reverse($seqDays, true); // all days in the filtered date range
 
 // Helper
 function sevBadge($s) {
@@ -575,7 +617,7 @@ include '../includes/header.php';
     </div>
     <div class="az-kpi">
         <div class="az-kpi-lbl">Net P&amp;L</div>
-        <div class="az-kpi-val <?= $netPL >= 0 ? 'pos' : 'neg' ?>"><?= ($netPL>=0?'+':'') ?>$<?= number_format($netPL,2) ?></div>
+        <div class="az-kpi-val <?= $netPL >= 0 ? 'pos' : 'neg' ?>"><?= formatPL($netPL) ?></div>
         <div class="az-kpi-sub">After brok + swap</div>
     </div>
     <div class="az-kpi">
@@ -585,22 +627,22 @@ include '../includes/header.php';
     </div>
     <div class="az-kpi">
         <div class="az-kpi-lbl">Expectancy</div>
-        <div class="az-kpi-val <?= $expectancy >= 0 ? 'pos' : 'neg' ?>"><?= ($expectancy>=0?'+':'') ?>$<?= $expectancy ?></div>
-        <div class="az-kpi-sub">Avg $ per trade</div>
+        <div class="az-kpi-val <?= $expectancy >= 0 ? 'pos' : 'neg' ?>"><?= formatPL($expectancy) ?></div>
+        <div class="az-kpi-sub">Avg <?= getActiveCurrency()['symbol'] ?> per trade</div>
     </div>
     <div class="az-kpi">
         <div class="az-kpi-lbl">Avg Win</div>
-        <div class="az-kpi-val pos">+$<?= $avgWin ?></div>
+        <div class="az-kpi-val pos"><?= formatPL($avgWin) ?></div>
         <div class="az-kpi-sub">per winning trade</div>
     </div>
     <div class="az-kpi">
         <div class="az-kpi-lbl">Avg Loss</div>
-        <div class="az-kpi-val neg">$<?= $avgLoss ?></div>
+        <div class="az-kpi-val neg"><?= formatUSD($avgLoss) ?></div>
         <div class="az-kpi-sub">per losing trade</div>
     </div>
     <div class="az-kpi">
         <div class="az-kpi-lbl">Brokerage</div>
-        <div class="az-kpi-val <?= $brokPct > 15 ? 'neg' : 'wrn' ?>">-$<?= number_format($totalBrok,2) ?></div>
+        <div class="az-kpi-val <?= $brokPct > 15 ? 'neg' : 'wrn' ?>">-<?= formatUSD($totalBrok) ?></div>
         <div class="az-kpi-sub"><?= $brokPct ?>% of gross profit</div>
     </div>
     <div class="az-kpi">
@@ -682,12 +724,12 @@ include '../includes/header.php';
             <div class="az-bar-val <?= $wr >= 50 ? 'pos' : ($wr >= 38 ? 'wrn' : 'neg') ?>"><?= $wr ?>%</div>
         </div>
         <div style="padding-left:100px;margin-top:-6px;margin-bottom:12px;font-size:10px;color:var(--text-muted)">
-            <?= $lb['c'] ?> trades &nbsp;·&nbsp; avg $<?= $lb['avgPL'] ?> &nbsp;·&nbsp; net <span style="color:<?= $lb['net']>=0?'var(--profit)':'var(--loss)' ?>">$<?= number_format($lb['net'],2) ?></span>
+            <?= $lb['c'] ?> trades &nbsp;·&nbsp; avg <?= formatPL($lb['avgPL']) ?> &nbsp;·&nbsp; net <span style="color:<?= $lb['net']>=0?'var(--profit)':'var(--loss)' ?>"><?= formatPL($lb['net']) ?></span>
         </div>
         <?php endforeach; ?>
         <div style="font-size:11px;color:var(--text-muted);padding-top:6px;border-top:1px solid var(--border-light)">
-            Large brok: <strong style="color:var(--loss)">-$<?= number_format($lotBuckets['large']['b'],2) ?></strong>
-            &nbsp;·&nbsp; Small brok: <strong style="color:var(--loss)">-$<?= number_format($lotBuckets['small']['b'],2) ?></strong>
+            Large brok: <strong style="color:var(--loss)">-<?= formatUSD($lotBuckets['large']['b']) ?></strong>
+            &nbsp;·&nbsp; Small brok: <strong style="color:var(--loss)">-<?= formatUSD($lotBuckets['small']['b']) ?></strong>
         </div>
     </div>
 </div>
@@ -755,9 +797,9 @@ include '../includes/header.php';
             <td><span class="symbol-badge"><?= htmlspecialchars($sym) ?></span></td>
             <td class="mono"><?= $s['c'] ?></td>
             <td style="font-weight:600;color:<?= $sWR>=50?'var(--profit)':($sWR>=40?'var(--warning)':'var(--loss)') ?>"><?= $sWR ?>%</td>
-            <td class="<?= $s['pl']>=0?'pl-positive':'pl-negative' ?> mono"><?= ($s['pl']>=0?'+':'') ?>$<?= number_format($s['pl'],2) ?></td>
-            <td class="pl-negative mono">-$<?= number_format($s['b'],2) ?></td>
-            <td class="<?= $s['net']>=0?'pl-positive':'pl-negative' ?> mono" style="font-weight:700"><?= ($s['net']>=0?'+':'') ?>$<?= number_format($s['net'],2) ?></td>
+            <td class="<?= $s['pl']>=0?'pl-positive':'pl-negative' ?> mono"><?= formatPL($s['pl']) ?></td>
+            <td class="pl-negative mono">-<?= formatUSD($s['b']) ?></td>
+            <td class="<?= $s['net']>=0?'pl-positive':'pl-negative' ?> mono" style="font-weight:700"><?= formatPL($s['net']) ?></td>
             <td><span style="font-size:10px;font-weight:700;color:<?= $verdict[1] ?>"><?= $verdict[0] ?></span></td>
         </tr>
         <?php endforeach; ?>
@@ -768,7 +810,7 @@ include '../includes/header.php';
 <!-- Expectancy summary -->
 <div class="az-exp-box" style="margin-bottom:20px">
     <strong style="color:var(--text-primary)">Summary:</strong>
-    Win rate <?= $winRate ?>% with R:R <?= $rrRatio ?> gives an expectancy of <strong style="color:<?= $expectancy>=0?'var(--profit)':'var(--loss)' ?>"><?= ($expectancy>=0?'+':'') ?>$<?= $expectancy ?> per trade</strong>.
+    Win rate <?= $winRate ?>% with R:R <?= $rrRatio ?> gives an expectancy of <strong style="color:<?= $expectancy>=0?'var(--profit)':'var(--loss)' ?>"><?= formatPL($expectancy) ?> per trade</strong>.
     Profit factor <?= $profitFactor ?> <?= $profitFactor >= 1.5 ? '✓ above target (1.5)' : '— target is ≥ 1.5' ?>.
     <?php if ($revengeTrades > 0): ?>
     Revenge trades detected: <?= $revengeTrades ?> (avoid immediately after a loss).
@@ -783,9 +825,329 @@ include '../includes/header.php';
 
 <?php endif; // hasData ?>
 
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- Intraday Trade Sequence (T1–T5) -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<?php if (!empty($seqDays)): ?>
+<div class="az-section-lbl" style="margin-top:10px">
+    <i class="fas fa-list-ol" style="color:var(--accent)"></i>
+    Intraday Trade Sequence — Position Tracker
+    <span style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-muted);margin-left:6px">
+        <?= date('d M Y', strtotime($from)) ?> → <?= date('d M Y', strtotime($to)) ?>
+    </span>
+    <span></span>
+</div>
+
+<!-- Top row: aggregate stat cards T1–T5 + mini chart -->
+<div class="az-grid2" style="margin-bottom:14px">
+
+    <!-- Left: per-position stat pills -->
+    <div class="az-card">
+        <div class="az-card-title"><i class="fas fa-chart-line" style="color:var(--accent)"></i> Avg Cumulative P&L by Position</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+            <?php for ($p = 1; $p <= $seqMaxPos; $p++):
+                $avg = $seqAvgData[$p - 1];
+                $wr  = $seqWRData[$p - 1];
+                $cnt = $seqPositions[$p]['count'];
+                if ($avg === null) continue;
+                $clr    = $avg >= 0 ? '#22c55e' : '#ef4444';
+                $bgClr  = $avg >= 0 ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)';
+                $bdrClr = $avg >= 0 ? 'rgba(34,197,94,.3)'  : 'rgba(239,68,68,.3)';
+                // bar width scaled 0–100% relative to best/worst position
+                $absVals = array_filter(array_map('abs', $seqAvgData), fn($v) => $v !== null);
+                $maxAbs  = count($absVals) ? max($absVals) : 1;
+                $barW    = $maxAbs > 0 ? min(100, round(abs($avg) / $maxAbs * 100)) : 0;
+            ?>
+            <div style="display:flex;align-items:center;gap:10px">
+                <!-- position badge -->
+                <div style="width:28px;height:28px;border-radius:8px;background:var(--bg-base);
+                            display:flex;align-items:center;justify-content:center;
+                            font-size:11px;font-weight:800;color:var(--text-secondary);flex-shrink:0">
+                    T<?= $p ?>
+                </div>
+                <!-- bar track -->
+                <div style="flex:1">
+                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+                        <span style="color:var(--text-muted)"><?= $cnt ?> day<?= $cnt !== 1 ? 's' : '' ?></span>
+                        <span style="font-family:'DM Mono',monospace;font-weight:700;color:<?= $clr ?>">
+                            <?= formatPL($avg) ?>
+                        </span>
+                    </div>
+                    <div style="height:8px;background:var(--bg-base);border-radius:99px;overflow:hidden">
+                        <div style="height:100%;width:<?= $barW ?>%;background:<?= $clr ?>;border-radius:99px"></div>
+                    </div>
+                </div>
+                <!-- win rate -->
+                <div style="text-align:right;flex-shrink:0;min-width:44px">
+                    <span style="font-size:11px;font-weight:700;color:<?= $wr !== null && $wr >= 50 ? '#22c55e' : '#ef4444' ?>">
+                        <?= $wr !== null ? $wr.'%' : '—' ?>
+                    </span>
+                    <div style="font-size:9px;color:var(--text-muted)">WR</div>
+                </div>
+            </div>
+            <?php endfor; ?>
+        </div>
+
+        <!-- key insight -->
+        <?php
+        $firstNeg = null;
+        for ($p = 1; $p <= $seqMaxPos; $p++) {
+            if ($seqAvgData[$p-1] !== null && $seqAvgData[$p-1] < 0) { $firstNeg = $p; break; }
+        }
+        $peak = null; $peakP = null;
+        for ($p = 1; $p <= $seqMaxPos; $p++) {
+            if ($seqAvgData[$p-1] !== null && ($peak === null || $seqAvgData[$p-1] > $peak)) {
+                $peak = $seqAvgData[$p-1]; $peakP = $p;
+            }
+        }
+        ?>
+        <?php if ($firstNeg !== null): ?>
+        <div style="margin-top:14px;padding:10px 12px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:10px;font-size:11px">
+            <i class="fas fa-triangle-exclamation" style="color:#ef4444;margin-right:5px"></i>
+            <strong>Drops negative at T<?= $firstNeg ?></strong> — on average your day turns red from trade <?= $firstNeg ?> onward. Consider stopping after T<?= $firstNeg - 1 ?>.
+        </div>
+        <?php elseif ($peakP !== null && $peakP < $seqMaxPos && $seqAvgData[$peakP] !== null && $seqAvgData[$peakP] < $peak): ?>
+        <div style="margin-top:14px;padding:10px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;font-size:11px">
+            <i class="fas fa-arrow-trend-down" style="color:#f59e0b;margin-right:5px"></i>
+            <strong>Peak at T<?= $peakP ?></strong> — your P&L peaks after trade <?= $peakP ?> then starts declining. Consider tightening rules after T<?= $peakP ?>.
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Right: aggregate trend chart -->
+    <div class="az-card">
+        <div class="az-card-title"><i class="fas fa-wave-square" style="color:var(--accent-purple)"></i> Cumulative P&L Trend (avg across all days)</div>
+        <div style="position:relative;height:220px"><canvas id="seqAvgChart"></canvas></div>
+    </div>
+</div>
+
+<!-- Per-day table -->
+<div class="az-card" style="margin-bottom:14px;padding:0">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div class="az-card-title" style="margin-bottom:0">
+            <i class="fas fa-table-list" style="color:var(--accent-cyan)"></i> Daily Breakdown — Cumulative P&L After Each Trade
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-size:11px;color:var(--text-muted)">
+                <?= count($seqTableDays) ?> trading day<?= count($seqTableDays) !== 1 ? 's' : '' ?>
+                &nbsp;·&nbsp;<?= date('d M Y', strtotime($from)) ?> – <?= date('d M Y', strtotime($to)) ?>
+                &nbsp;·&nbsp;hover a cell for trade detail
+            </div>
+            <!-- Scroll nav arrows -->
+            <div style="display:flex;gap:4px;margin-left:4px">
+                <button onclick="seqScroll(-200)" title="Scroll left" style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--bg-base);color:var(--text-secondary);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .15s" onmouseover="this.style.background='var(--accent)';this.style.color='#fff'" onmouseout="this.style.background='var(--bg-base)';this.style.color='var(--text-secondary)'"><i class="fas fa-chevron-left"></i></button>
+                <button onclick="seqScroll(200)"  title="Scroll right" style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--bg-base);color:var(--text-secondary);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .15s" onmouseover="this.style.background='var(--accent)';this.style.color='#fff'" onmouseout="this.style.background='var(--bg-base)';this.style.color='var(--text-secondary)'"><i class="fas fa-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scroll progress bar -->
+    <div style="height:3px;background:var(--bg-base);position:relative;overflow:hidden">
+        <div id="seq-scroll-bar" style="position:absolute;left:0;top:0;height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width .1s,left .1s"></div>
+    </div>
+
+    <!-- outer wrapper: flex row — left frozen | scrollable middle | right frozen -->
+    <div style="display:flex;align-items:stretch;overflow:hidden">
+
+        <!-- LEFT frozen: Date + # Trades -->
+        <div style="flex-shrink:0;z-index:4;box-shadow:3px 0 6px rgba(0,0,0,.10)">
+            <table id="seq-left" style="border-collapse:separate;border-spacing:0;font-size:12px;height:100%">
+                <thead>
+                    <tr style="background:var(--bg-base)">
+                        <th style="padding:10px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-base)">Date</th>
+                        <th style="padding:10px 8px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--bg-base)"># Trades</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($seqTableDays as $date => $dayTrs):
+                    $totalTrades = count($dayTrs); ?>
+                <tr class="seq-lr" data-date="<?= $date ?>" style="background:var(--bg-surface)" onmouseover="seqHover('<?= $date ?>',true)" onmouseout="seqHover('<?= $date ?>',false)">
+                    <td style="padding:10px 14px;font-weight:700;white-space:nowrap;border-bottom:1px solid var(--border)">
+                        <?= date('d M', strtotime($date)) ?>
+                        <div style="font-size:10px;color:var(--text-muted);font-weight:400"><?= date('D', strtotime($date)) ?></div>
+                    </td>
+                    <td style="padding:10px 8px;text-align:center;color:var(--text-muted);border-bottom:1px solid var(--border)"><?= $totalTrades ?></td>
+                </tr>
+                <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr style="background:var(--bg-base)">
+                        <td style="padding:10px 14px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);border-top:2px solid var(--border)">Average</td>
+                        <td style="padding:10px 8px;text-align:center;font-size:10px;color:var(--text-muted);border-top:2px solid var(--border)">—</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- MIDDLE scrollable: T1…TN -->
+        <div id="seq-mid-scroll" style="flex:1;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:var(--border) transparent">
+            <table id="seq-mid" style="border-collapse:separate;border-spacing:0;font-size:12px">
+                <thead>
+                    <tr style="background:var(--bg-base)">
+                        <?php for ($p = 1; $p <= $seqMaxPos; $p++): ?>
+                        <th style="padding:10px 8px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);border-bottom:1px solid var(--border);white-space:nowrap;min-width:90px">
+                            After T<?= $p ?>
+                        </th>
+                        <?php endfor; ?>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($seqTableDays as $date => $dayTrs): ?>
+                <tr class="seq-mr" data-date="<?= $date ?>" style="background:var(--bg-surface)" onmouseover="seqHover('<?= $date ?>',true)" onmouseout="seqHover('<?= $date ?>',false)">
+                    <?php for ($p = 1; $p <= $seqMaxPos; $p++):
+                        $tr = $dayTrs[$p - 1] ?? null;
+                        if ($tr === null): ?>
+                    <td style="padding:10px 8px;text-align:center;color:var(--border);border-bottom:1px solid var(--border)">—</td>
+                    <?php else:
+                        $cumVal = $tr['cum'];
+                        $indNet = $tr['net'];
+                        $cumClr = $cumVal >= 0 ? '#22c55e' : '#ef4444';
+                        $cumBg  = $cumVal >= 0 ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)';
+                        $arrow  = $indNet > 0 ? '▲' : ($indNet < 0 ? '▼' : '·');
+                        $arrClr = $indNet > 0 ? '#22c55e' : ($indNet < 0 ? '#ef4444' : '#94a3b8');
+                        $sym    = $tr['symbol'] ?? '';
+                    ?>
+                    <td style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)" title="T<?= $p ?>: <?= $sym ?> | Trade P&L: <?= formatPL($indNet) ?>">
+                        <div style="background:<?= $cumBg ?>;border-radius:7px;padding:5px 6px">
+                            <div style="font-family:'DM Mono',monospace;font-weight:700;font-size:11px;color:<?= $cumClr ?>">
+                                <?= formatPL($cumVal) ?>
+                            </div>
+                            <div style="font-size:9px;color:<?= $arrClr ?>;margin-top:1px">
+                                <?= $arrow ?> <?= formatPL($indNet) ?>
+                            </div>
+                        </div>
+                    </td>
+                    <?php endif; ?>
+                    <?php endfor; ?>
+                </tr>
+                <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr style="background:var(--bg-base)">
+                        <?php for ($p = 1; $p <= $seqMaxPos; $p++):
+                            $avg = $seqAvgData[$p - 1];
+                            $clr = $avg === null ? 'var(--text-muted)' : ($avg >= 0 ? '#22c55e' : '#ef4444');
+                        ?>
+                        <td style="padding:10px 8px;text-align:center;font-family:'DM Mono',monospace;font-weight:800;color:<?= $clr ?>;border-top:2px solid var(--border)">
+                            <?= $avg !== null ? formatPL($avg) : '—' ?>
+                        </td>
+                        <?php endfor; ?>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- RIGHT frozen: Day Total -->
+        <div style="flex-shrink:0;z-index:4;box-shadow:-3px 0 6px rgba(0,0,0,.10)">
+            <table id="seq-right" style="border-collapse:separate;border-spacing:0;font-size:12px;height:100%">
+                <thead>
+                    <tr style="background:var(--bg-base)">
+                        <th style="padding:10px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;border-left:2px solid var(--border);background:var(--bg-base)">Day Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($seqTableDays as $date => $dayTrs):
+                    $dayTotal = end($dayTrs)['cum'];
+                    $dayClr   = $dayTotal >= 0 ? '#22c55e' : '#ef4444';
+                    $dayBg    = $dayTotal >= 0 ? 'rgba(34,197,94,.07)' : 'rgba(239,68,68,.07)';
+                ?>
+                <tr class="seq-rr" data-date="<?= $date ?>" style="background:var(--bg-surface)" onmouseover="seqHover('<?= $date ?>',true)" onmouseout="seqHover('<?= $date ?>',false)">
+                    <td style="padding:10px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:800;font-size:13px;color:<?= $dayClr ?>;border-bottom:1px solid var(--border);border-left:2px solid var(--border);background:<?= $dayBg ?>">
+                        <?= formatPL($dayTotal) ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr style="background:var(--bg-base)">
+                        <td style="padding:10px 14px;border-top:2px solid var(--border);border-left:2px solid var(--border)"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+    </div><!-- /flex -->
+</div>
+
+<style>
+#seq-mid-scroll::-webkit-scrollbar        { height:5px }
+#seq-mid-scroll::-webkit-scrollbar-track  { background:var(--bg-base) }
+#seq-mid-scroll::-webkit-scrollbar-thumb  { background:var(--border);border-radius:3px }
+#seq-mid-scroll::-webkit-scrollbar-thumb:hover { background:var(--accent) }
+</style>
+<script>
+(function(){
+    var scroller = document.getElementById('seq-mid-scroll');
+    var bar      = document.getElementById('seq-scroll-bar');
+
+    // ── scroll progress bar ──────────────────────────────────────────────────
+    function updateBar() {
+        if (!scroller || !bar) return;
+        var max = scroller.scrollWidth - scroller.clientWidth;
+        if (max <= 0) { bar.style.width = '100%'; bar.style.left = '0%'; return; }
+        var pct = scroller.scrollLeft / max * 100;
+        var thumbW = Math.max(8, scroller.clientWidth / scroller.scrollWidth * 100);
+        bar.style.width = thumbW + '%';
+        bar.style.left  = (pct * (100 - thumbW) / 100) + '%';
+    }
+    if (scroller) scroller.addEventListener('scroll', updateBar);
+    window.addEventListener('resize', updateBar);
+
+    // ── scroll buttons ───────────────────────────────────────────────────────
+    window.seqScroll = function(dx) {
+        if (!scroller) return;
+        scroller.scrollBy({ left: dx, behavior: 'smooth' });
+    };
+
+    // ── row-height sync ──────────────────────────────────────────────────────
+    function syncSeqHeights() {
+        var lRows = document.querySelectorAll('#seq-left tbody tr');
+        var mRows = document.querySelectorAll('#seq-mid tbody tr');
+        var rRows = document.querySelectorAll('#seq-right tbody tr');
+        if (!lRows.length) return;
+        // Reset
+        lRows.forEach(function(r,i){
+            r.style.height='';
+            if(mRows[i]) mRows[i].style.height='';
+            if(rRows[i]) rRows[i].style.height='';
+        });
+        // Measure & set
+        lRows.forEach(function(lr,i){
+            var mr=mRows[i], rr=rRows[i];
+            var h=Math.max(lr.offsetHeight, mr?mr.offsetHeight:0, rr?rr.offsetHeight:0, 44);
+            lr.style.height=h+'px';
+            if(mr) mr.style.height=h+'px';
+            if(rr) rr.style.height=h+'px';
+        });
+        // Footer
+        var lF=document.querySelector('#seq-left tfoot tr');
+        var mF=document.querySelector('#seq-mid tfoot tr');
+        var rF=document.querySelector('#seq-right tfoot tr');
+        if(lF&&mF&&rF){
+            var fh=Math.max(lF.offsetHeight,mF.offsetHeight,rF.offsetHeight);
+            lF.style.height=fh+'px'; mF.style.height=fh+'px'; rF.style.height=fh+'px';
+        }
+        updateBar();
+    }
+
+    if (document.readyState==='complete') syncSeqHeights();
+    else window.addEventListener('load', syncSeqHeights);
+    window.addEventListener('resize', syncSeqHeights);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncSeqHeights);
+})();
+
+// Row hover sync across panels
+function seqHover(date, on) {
+    var bg = on ? 'var(--bg-base)' : 'var(--bg-surface)';
+    document.querySelectorAll('[data-date="'+date+'"]').forEach(function(r){ r.style.background=bg; });
+}
+</script>
+<?php endif; // seqDays ?>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function(){
+    const CS    = <?= json_encode(getActiveCurrency()['symbol']) ?>;
     const dark  = document.documentElement.getAttribute('data-theme') === 'dark';
     const gridC = dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)';
     const textC = dark ? '#94a3b8' : '#64748b';
@@ -806,10 +1168,10 @@ include '../includes/header.php';
             interaction:{mode:'index',intersect:false},
             plugins:{legend:{display:false},tooltip:{callbacks:{
                 title: t => t[0].label,
-                label: c => ' Cumulative P/L: ' + (c.parsed.y >= 0 ? '+' : '') + '$' + c.parsed.y.toFixed(2)
+                label: c => ' Cumulative P/L: ' + (c.parsed.y >= 0 ? '+' : '') + CS + c.parsed.y.toFixed(2)
             }}},
             scales:{x:{...baseScales.x,ticks:{...baseScales.x.ticks,maxTicksLimit:8,maxRotation:30}},
-                    y:{...baseScales.y,ticks:{...baseScales.y.ticks,callback:v=>'$'+v}}}}});
+                    y:{...baseScales.y,ticks:{...baseScales.y.ticks,callback:v=>CS+Number(v).toFixed(2)}}}}});
     }
 
     // Exit reason donut
@@ -818,7 +1180,7 @@ include '../includes/header.php';
             labels:['SL','TP','Manual','Stop-Out'],
             datasets:[{data:[<?= $slHits ?>,<?= $tpHits ?>,<?= $manualClose ?>,<?= $soHits ?>],
             backgroundColor:['#ef4444','#22c55e','#3b82f6','#f59e0b'],borderWidth:0,hoverOffset:4}]
-        }, options:{responsive:false,cutout:'65%',plugins:{legend:{display:false},
+        }, options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},
             tooltip:{callbacks:{label:c=>' '+c.label+': '+c.parsed}}}}});
     }
 
@@ -852,6 +1214,54 @@ include '../includes/header.php';
             plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' WR: '+c.parsed.y+'%',afterLabel:c=>' Net: $'+dowN[c.dataIndex]}}},
             scales:{x:baseScales.x,y:{...baseScales.y,min:0,max:100,ticks:{...baseScales.y.ticks,callback:v=>v+'%'}}}}});
     }
+
+    // ── Trade Sequence Avg Chart (T1–T5) ─────────────────────────────────────
+    const seqAvg = <?= json_encode($seqAvgData) ?>;
+    const seqWR  = <?= json_encode($seqWRData) ?>;
+    const seqCtx = document.getElementById('seqAvgChart');
+    if (seqCtx && seqAvg.filter(v => v !== null).length) {
+        const seqColors = seqAvg.map(v => v === null ? 'transparent' : v >= 0 ? '#22c55e' : '#ef4444');
+        const seqBgs    = seqAvg.map(v => v === null ? 'transparent' : v >= 0 ? 'rgba(34,197,94,.18)' : 'rgba(239,68,68,.18)');
+        new Chart(seqCtx, { type:'bar', data:{
+            labels: <?= json_encode(array_map(fn($i) => 'T'.$i, range(1, $seqMaxPos))) ?>,
+            datasets:[
+                { label:'Avg Cum P&L', data:seqAvg,
+                  backgroundColor:seqBgs, borderColor:seqColors,
+                  borderWidth:2, borderRadius:6, borderSkipped:false, order:2 },
+                { label:'Trend', data:seqAvg, type:'line',
+                  borderColor:'rgba(99,102,241,.8)', borderWidth:2,
+                  pointBackgroundColor:seqColors, pointRadius:5, pointHoverRadius:7,
+                  tension:.35, fill:false, order:1 }
+            ]
+        }, options:{ responsive:true, maintainAspectRatio:false,
+            interaction:{ mode:'index', intersect:false },
+            plugins:{ legend:{display:false},
+                tooltip:{ backgroundColor:dark?'#1e293b':'#fff',
+                    borderColor:dark?'#334155':'#e2e8f0', borderWidth:1,
+                    titleColor:textC, bodyColor:dark?'#cbd5e1':'#475569', padding:10,
+                    callbacks:{
+                        label: c => {
+                            if (c.dataset.label === 'Trend') return '';
+                            const v = c.parsed.y;
+                            return v === null ? '' : ' Avg after ' + c.label + ': ' + (v>=0?'+':'') + CS + v.toFixed(2);
+                        },
+                        afterLabel: c => {
+                            if (c.dataset.label === 'Trend') return '';
+                            const wr = seqWR[c.dataIndex];
+                            return wr !== null ? ' Profitable: ' + wr + '% of days' : '';
+                        }
+                    }
+                }
+            },
+            scales:{
+                x:{ grid:{color:gridC}, ticks:{color:textC,font:{size:11},
+                    callback:(v,i) => ['T1','T2','T3','T4','T5'][i] } },
+                y:{ grid:{color:gridC}, ticks:{color:textC,font:{size:10},callback:v=>CS+v},
+                    afterDataLimits(a){ const p=(a.max-a.min)*.15||5; a.min-=p; a.max+=p; } }
+            }
+        }});
+    }
+
 })();
 </script>
 

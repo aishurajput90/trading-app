@@ -27,14 +27,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$email || !$password) {
         $error = 'Please enter your email and password.';
     } else {
-        $stmt = getDB()->prepare("SELECT id, name, password FROM users WHERE email = ?");
+        $stmt = getDB()->prepare("SELECT id, name, password, currency FROM users WHERE email = ?");
         $stmt->execute([strtolower($email)]);
         $row = $stmt->fetch();
 
         if ($row && password_verify($password, $row['password'])) {
             session_regenerate_id(true); // Prevent session fixation
-            $_SESSION['user_id']   = (int)$row['id'];
-            $_SESSION['user_name'] = $row['name'];
+            $_SESSION['user_id']       = (int)$row['id'];
+            $_SESSION['user_name']     = $row['name'];
+            $_SESSION['user_currency'] = $row['currency'] ?? 'USD';
             // Track login
             $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? null;
             getDB()->prepare("UPDATE users SET last_login_at = NOW(), last_active_at = NOW(), login_count = login_count + 1 WHERE id = ?")
@@ -62,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="../assets/css/style.css" rel="stylesheet">
+    <link href="../assets/css/style.css?v=1.0.2" rel="stylesheet">
     <script>(function(){ var t=localStorage.getItem('dos_theme')||'light'; document.documentElement.setAttribute('data-theme',t); })();</script>
     <style>
         body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg-body); }

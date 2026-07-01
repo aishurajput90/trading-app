@@ -860,8 +860,9 @@ $kpis = [
 
             $tip = date('d M Y', strtotime($ds));
             if ($cfg) $tip .= ' — ' . $cfg['lbl'] . ' (D:' . ($rec['discipline_score']??'—') . ')';
-            if ($tCnt > 0) { $tip .= "\n" . $tCnt . ' trade' . ($tCnt>1?'s':'') . ' · P/L: ' . $plSign . '$' . number_format(abs($tPL),2); }
-            if ($tBrok > 0) $tip .= ' · Brok: $' . number_format($tBrok,2);
+            $cs_psy = getActiveCurrency()['symbol'];
+            if ($tCnt > 0) { $tip .= "\n" . $tCnt . ' trade' . ($tCnt>1?'s':'') . ' · P/L: ' . $plSign . $cs_psy . number_format(abs($tPL),2); }
+            if ($tBrok > 0) $tip .= ' · Brok: ' . $cs_psy . number_format($tBrok,2);
             if ($rec && $rec['pre_emotion']) $tip .= "\nEmotion: " . ucfirst($rec['pre_emotion']);
         ?>
 
@@ -883,9 +884,9 @@ $kpis = [
                 <?php if ($tCnt > 0): ?>
                 <div class="cal-trade-info">
                     <div class="cal-trades-count"><?= $tCnt ?>T</div>
-                    <div class="cal-pl" style="color:<?= $plClr ?>"><?= $plSign ?><?= '$'.number_format(abs($tPL),0) ?></div>
+                    <div class="cal-pl" style="color:<?= $plClr ?>"><?= $plSign ?><?= $cs_psy.number_format(abs($tPL),0) ?></div>
                     <?php if ($tBrok > 0): ?>
-                    <div class="cal-brok">B:$<?= number_format($tBrok,0) ?></div>
+                    <div class="cal-brok">B:<?= $cs_psy ?><?= number_format($tBrok,0) ?></div>
                     <?php endif; ?>
                 </div>
                 <?php elseif (!$cfg): ?>

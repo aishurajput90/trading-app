@@ -8,7 +8,7 @@ if (!empty($_POST)) validateCsrfOrDie();
 $db        = getDB();
 $today     = date('Y-m-d');
 
-// Ensure table exists
+// Ensure tables exist
 $db->exec("CREATE TABLE IF NOT EXISTS user_targets (
     id                INT AUTO_INCREMENT PRIMARY KEY,
     user_id           INT NOT NULL DEFAULT 1,
@@ -21,9 +21,28 @@ $db->exec("CREATE TABLE IF NOT EXISTS user_targets (
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_target_user (user_id)
 )");
+$db->exec("CREATE TABLE IF NOT EXISTS target_history (
+    id                INT AUTO_INCREMENT PRIMARY KEY,
+    user_id           INT NOT NULL,
+    daily_pl_target   DECIMAL(10,2) NOT NULL DEFAULT 0,
+    weekly_pl_target  DECIMAL(10,2) NOT NULL DEFAULT 0,
+    monthly_pl_target DECIMAL(10,2) NOT NULL DEFAULT 0,
+    win_rate_target   DECIMAL(5,2)  NOT NULL DEFAULT 60,
+    effective_from    DATE NOT NULL,
+    effective_to      DATE NULL DEFAULT NULL,
+    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_user_dates (user_id, effective_from)
+)");
 
 // POST: save targets
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_targets') {
+    $newDaily   = (float)($_POST['daily_pl_target']   ?? 0);
+    $newWeekly  = (float)($_POST['weekly_pl_target']  ?? 0);
+    $newMonthly = (float)($_POST['monthly_pl_target'] ?? 0);
+    $newWR      = max(0, min(100, (float)($_POST['win_rate_target'] ?? 60)));
+    $newMaxTr   = max(1,          (int)($_POST['max_daily_trades']  ?? 5));
+    $newRR      = max(0.1,        (float)($_POST['min_rr_ratio']    ?? 2.0));
+
     $stmt = $db->prepare(
         "INSERT INTO user_targets (user_id, daily_pl_target, weekly_pl_target, monthly_pl_target,
           win_rate_target, max_daily_trades, min_rr_ratio)
@@ -33,15 +52,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
           monthly_pl_target=VALUES(monthly_pl_target), win_rate_target=VALUES(win_rate_target),
           max_daily_trades=VALUES(max_daily_trades), min_rr_ratio=VALUES(min_rr_ratio)"
     );
-    $stmt->execute([
-        $userId,
-        (float)($_POST['daily_pl_target']   ?? 0),
-        (float)($_POST['weekly_pl_target']  ?? 0),
-        (float)($_POST['monthly_pl_target'] ?? 0),
-        max(0, min(100, (float)($_POST['win_rate_target']  ?? 60))),
-        max(1,          (int)($_POST['max_daily_trades']   ?? 5)),
-        max(0.1,        (float)($_POST['min_rr_ratio']     ?? 2.0)),
-    ]);
+    $stmt->execute([$userId, $newDaily, $newWeekly, $newMonthly, $newWR, $newMaxTr, $newRR]);
+
+    // Close any open history period (set effective_to = yesterday so today's new record takes over)
+    $db->prepare("UPDATE target_history SET effective_to = DATE_SUB(?, INTERVAL 1 DAY)
+                  WHERE user_id=? AND effective_to IS NULL AND effective_from < ?")
+       ->execute([$today, $userId, $today]);
+    // Remove any record that already started today (replace it)
+    $db->prepare("DELETE FROM target_history WHERE user_id=? AND effective_from=?")
+       ->execute([$userId, $today]);
+    // Insert new open-ended history record
+    $db->prepare("INSERT INTO target_history (user_id, daily_pl_target, weekly_pl_target, monthly_pl_target, win_rate_target, effective_from)
+                  VALUES (?,?,?,?,?,?)")
+       ->execute([$userId, $newDaily, $newWeekly, $newMonthly, $newWR, $today]);
+
     header('Location: targets.php?saved=1');
     exit;
 }
@@ -54,6 +78,23 @@ $targets = $tStmt->fetch() ?: [
     'win_rate_target' => 60, 'max_daily_trades' => 5, 'min_rr_ratio' => 2.0,
 ];
 $hasTargets = (float)$targets['daily_pl_target'] > 0 || (float)$targets['monthly_pl_target'] > 0;
+
+// Load target history (sorted newest first for fast lookup)
+$thStmt = $db->prepare("SELECT daily_pl_target, weekly_pl_target, monthly_pl_target, win_rate_target,
+                                effective_from, effective_to
+                         FROM target_history WHERE user_id=? ORDER BY effective_from DESC");
+$thStmt->execute([$userId]);
+$tHistoryRows = $thStmt->fetchAll();
+
+// Returns the daily_pl_target that was active on a given date, falling back to current
+$getHistoricalDailyTarget = function(string $date) use ($tHistoryRows, &$targets): float {
+    foreach ($tHistoryRows as $th) {
+        if ($th['effective_from'] <= $date && ($th['effective_to'] === null || $th['effective_to'] >= $date)) {
+            return (float)$th['daily_pl_target'];
+        }
+    }
+    return (float)$targets['daily_pl_target'];
+};
 
 // Date range
 $range    = in_array($_GET['range'] ?? '', ['7','30','90']) ? (int)$_GET['range'] : 30;
@@ -72,24 +113,27 @@ $stmt = $db->prepare("
 $stmt->execute([$userId, $fromDate, $today]);
 $dailyRows = $stmt->fetchAll();
 
-// Build chart arrays
-$chartDates     = [];
-$chartDailyPL   = [];
-$chartCumActual = [];
-$chartCumTarget = [];
-$chartBarColors = [];
-$chartBarBorder = [];
+// Build chart arrays (per-day historical target used for each date)
+$chartDates        = [];
+$chartDailyPL      = [];
+$chartDailyTargets = [];
+$chartCumActual    = [];
+$chartCumTarget    = [];
+$chartBarColors    = [];
+$chartBarBorder    = [];
 $cumActual = 0.0; $cumTarget = 0.0;
 
 foreach ($dailyRows as $r) {
-    $pl = (float)$r['net_pl'];
+    $pl       = (float)$r['net_pl'];
+    $dayTgt   = $getHistoricalDailyTarget($r['d']);
     $cumActual += $pl;
-    $cumTarget += $dailyTarget;
-    $chartDates[]     = date('d M', strtotime($r['d']));
-    $chartDailyPL[]   = round($pl, 2);
-    $chartCumActual[] = round($cumActual, 2);
-    $chartCumTarget[] = round($cumTarget, 2);
-    if ($dailyTarget > 0 && $pl >= $dailyTarget) {
+    $cumTarget += $dayTgt;
+    $chartDates[]        = date('d M', strtotime($r['d']));
+    $chartDailyPL[]      = round($pl, 2);
+    $chartDailyTargets[] = $dayTgt;
+    $chartCumActual[]    = round($cumActual, 2);
+    $chartCumTarget[]    = round($cumTarget, 2);
+    if ($dayTgt > 0 && $pl >= $dayTgt) {
         $chartBarColors[] = 'rgba(34,197,94,.78)';   $chartBarBorder[] = '#16a34a';
     } elseif ($pl > 0) {
         $chartBarColors[] = 'rgba(34,197,94,.4)';    $chartBarBorder[] = '#16a34a';
@@ -137,8 +181,9 @@ $recentDays = $stmt->fetchAll();
 
 $hitStreak = 0; $streakOn = true; $daysHitMonth = 0; $monthDaysTraded = 0;
 foreach ($recentDays as $rd) {
-    $rdPL  = (float)$rd['net_pl'];
-    $isHit = $dailyTarget > 0 ? $rdPL >= $dailyTarget : $rdPL > 0;
+    $rdPL    = (float)$rd['net_pl'];
+    $rdTgt   = $getHistoricalDailyTarget($rd['d']);
+    $isHit   = $rdTgt > 0 ? $rdPL >= $rdTgt : $rdPL > 0;
     if ($rd['d'] >= $monthStart) { $monthDaysTraded++; if ($isHit) $daysHitMonth++; }
     if ($streakOn) { if ($isHit) $hitStreak++; else $streakOn = false; }
 }
@@ -151,6 +196,70 @@ $avgDay   = count($allPLs) ? array_sum(array_map('floatval', $allPLs)) / count($
 // Win rate target
 $wrTarget = (float)$targets['win_rate_target'];
 $wrPct    = $wrTarget > 0 ? round($monthWinRate / $wrTarget * 100, 1) : null;
+
+// ── Weekly achievement tracker (last 16 weeks) ──
+$wkTargetVal = (float)$targets['weekly_pl_target'];
+$wk16Start   = date('Y-m-d', strtotime('monday this week -15 weeks'));
+$wkStmt = $db->prepare("
+    SELECT YEARWEEK(trade_datetime,1) as yw,
+           MIN(DATE(trade_datetime)) as wk_start,
+           COALESCE(SUM(profit_loss - brokerage + swap),0) as net_pl,
+           COUNT(*) as trades
+    FROM trades WHERE user_id=? AND DATE(trade_datetime) >= ?
+    GROUP BY yw ORDER BY yw ASC
+");
+$wkStmt->execute([$userId, $wk16Start]);
+$wkRows = $wkStmt->fetchAll();
+
+$wkLabels = []; $wkPLs = []; $wkColors = []; $wkTrades = [];
+foreach ($wkRows as $r) {
+    $pl = round((float)$r['net_pl'], 2);
+    $wkLabels[] = 'W' . date('W', strtotime($r['wk_start']));
+    $wkPLs[]    = $pl;
+    $wkTrades[] = (int)$r['trades'];
+    if ($wkTargetVal > 0) {
+        $wkColors[] = $pl >= $wkTargetVal ? '#22c55e' : ($pl > 0 ? '#f59e0b' : '#ef4444');
+    } else {
+        $wkColors[] = $pl >= 0 ? '#22c55e' : '#ef4444';
+    }
+}
+
+// ── Monthly achievement tracker (last 12 months) ──
+$moTargetVal = (float)$targets['monthly_pl_target'];
+$mo12Start   = date('Y-m-01', strtotime('-11 months'));
+$moStmt = $db->prepare("
+    SELECT DATE_FORMAT(trade_datetime,'%Y-%m') as ym,
+           COALESCE(SUM(profit_loss - brokerage + swap),0) as net_pl,
+           COUNT(*) as trades
+    FROM trades WHERE user_id=? AND DATE(trade_datetime) >= ?
+    GROUP BY ym ORDER BY ym ASC
+");
+$moStmt->execute([$userId, $mo12Start]);
+$moRows = $moStmt->fetchAll();
+
+$moLabels = []; $moPLs = []; $moColors = []; $moTrades = [];
+$moNames  = ['01'=>'Jan','02'=>'Feb','03'=>'Mar','04'=>'Apr','05'=>'May','06'=>'Jun',
+             '07'=>'Jul','08'=>'Aug','09'=>'Sep','10'=>'Oct','11'=>'Nov','12'=>'Dec'];
+foreach ($moRows as $r) {
+    $pl = round((float)$r['net_pl'], 2);
+    [$yr, $mo] = explode('-', $r['ym']);
+    $moLabels[] = ($moNames[$mo] ?? $mo) . " '" . substr($yr, 2);
+    $moPLs[]    = $pl;
+    $moTrades[] = (int)$r['trades'];
+    if ($moTargetVal > 0) {
+        $moColors[] = $pl >= $moTargetVal ? '#22c55e' : ($pl > 0 ? '#f59e0b' : '#ef4444');
+    } else {
+        $moColors[] = $pl >= 0 ? '#22c55e' : '#ef4444';
+    }
+}
+
+// ── Yearly progress ──
+$yrStmt = $db->prepare("SELECT COALESCE(SUM(profit_loss - brokerage + swap),0) as net_pl FROM trades WHERE user_id=? AND DATE(trade_datetime) >= ?");
+$yrStmt->execute([$userId, date('Y-01-01')]);
+$ytdPL        = round((float)$yrStmt->fetch()['net_pl'], 2);
+$yearlyTarget = $moTargetVal * 12;
+$ytdPct       = $yearlyTarget > 0 ? min(100, max(0, $ytdPL / $yearlyTarget * 100)) : 0;
+$ytdColor     = ($ytdPL >= $yearlyTarget && $yearlyTarget > 0) ? '#22c55e' : ($ytdPL > 0 ? '#f59e0b' : '#ef4444');
 
 $saved = !empty($_GET['saved']);
 
@@ -293,6 +402,12 @@ include '../includes/header.php';
     border-radius: 18px;
     margin-bottom: 20px;
 }
+.tg-tracker-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+@media(max-width:720px) { .tg-tracker-grid { grid-template-columns:1fr; } }
+@keyframes tg-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.tg-live-dot { animation: tg-pulse 2s ease-in-out infinite; }
+.tg-hist-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+@media(max-width:600px) { .tg-hist-grid { grid-template-columns:repeat(2,1fr); } }
 </style>
 
 <?php if ($saved): ?>
@@ -348,10 +463,10 @@ include '../includes/header.php';
             </svg>
             <div class="tg-ring-info">
                 <div class="tg-ring-val" style="color:<?= $monthActual >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
-                    <?= ($monthActual >= 0 ? '+' : '') ?>$<?= number_format($monthActual, 0) ?>
+                    <?= formatPL($monthActual) ?>
                 </div>
                 <div class="tg-ring-sub">
-                    Target: $<?= number_format($monthTarget, 0) ?>
+                    Target: <?= formatUSD($monthTarget) ?>
                 </div>
                 <?php if ($monthPct !== null): ?>
                 <div class="tg-pct-pill" style="background:<?= $mRingPct >= 100 ? 'rgba(34,197,94,.15)' : 'rgba(245,158,11,.15)' ?>;color:<?= $mRingPct >= 100 ? '#16a34a' : '#d97706' ?>">
@@ -385,9 +500,9 @@ include '../includes/header.php';
             </svg>
             <div class="tg-ring-info">
                 <div class="tg-ring-val" style="color:<?= $weekActual >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
-                    <?= ($weekActual >= 0 ? '+' : '') ?>$<?= number_format($weekActual, 0) ?>
+                    <?= formatPL($weekActual) ?>
                 </div>
-                <div class="tg-ring-sub">Target: $<?= number_format($weekTarget, 0) ?></div>
+                <div class="tg-ring-sub">Target: <?= formatUSD($weekTarget) ?></div>
                 <?php if ($weekPct !== null): ?>
                 <div class="tg-pct-pill" style="background:<?= $wRingPct >= 100 ? 'rgba(34,197,94,.15)' : 'rgba(37,99,235,.12)' ?>;color:<?= $wRingPct >= 100 ? '#16a34a' : '#2563eb' ?>">
                     <i class="fas fa-arrow-<?= $wRingPct >= 100 ? 'up' : 'right' ?>" style="font-size:9px"></i>
@@ -513,7 +628,7 @@ include '../includes/header.php';
             <div>
                 <div style="font-size:10px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Cumulative Actual</div>
                 <div style="font-family:'DM Mono',monospace;font-size:16px;font-weight:800;color:<?= $finalActual >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
-                    <?= ($finalActual >= 0 ? '+' : '') ?>$<?= number_format($finalActual, 2) ?>
+                    <?= formatPL($finalActual) ?>
                 </div>
             </div>
         </div>
@@ -523,7 +638,7 @@ include '../includes/header.php';
             <div>
                 <div style="font-size:10px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Cumulative Target</div>
                 <div style="font-family:'DM Mono',monospace;font-size:16px;font-weight:800;color:#d97706">
-                    +$<?= number_format($finalTarget, 2) ?>
+                    +<?= formatUSD($finalTarget) ?>
                 </div>
             </div>
         </div>
@@ -534,7 +649,7 @@ include '../includes/header.php';
                     <?= $gap >= 0 ? 'Ahead of target' : 'Behind target' ?>
                 </div>
                 <div style="font-family:'DM Mono',monospace;font-size:16px;font-weight:800;color:<?= $gap >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
-                    <?= ($gap >= 0 ? '+' : '') ?>$<?= number_format($gap, 2) ?>
+                    <?= formatPL($gap) ?>
                 </div>
             </div>
         </div>
@@ -544,7 +659,7 @@ include '../includes/header.php';
             <div>
                 <div style="font-size:10px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Avg / Trading Day</div>
                 <div style="font-family:'DM Mono',monospace;font-size:16px;font-weight:800;color:<?= $avgDay >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
-                    <?= ($avgDay >= 0 ? '+' : '') ?>$<?= number_format($avgDay, 2) ?>
+                    <?= formatPL($avgDay) ?>
                 </div>
             </div>
         </div>
@@ -604,13 +719,14 @@ include '../includes/header.php';
                     <?php
                     $tableRows = array_slice(array_reverse($dailyRows), 0, 20);
                     foreach ($tableRows as $r):
-                        $rPL  = (float)$r['net_pl'];
-                        $rWR  = (int)$r['cnt'] > 0 ? round((float)$r['wins'] / (int)$r['cnt'] * 100) : 0;
-                        if ($dailyTarget > 0 && $rPL >= $dailyTarget)      { $stClass='tg-status-hit';     $stLabel='✓ Hit'; }
-                        elseif ($rPL > 0 && $dailyTarget > 0)              { $stClass='tg-status-partial'; $stLabel='↑ Partial'; }
-                        elseif ($rPL > 0)                                   { $stClass='tg-status-hit';     $stLabel='✓ Profit'; }
-                        elseif ($rPL < 0)                                   { $stClass='tg-status-miss';    $stLabel='✗ Loss'; }
-                        else                                                { $stClass='tg-status-none';    $stLabel='— Flat'; }
+                        $rPL    = (float)$r['net_pl'];
+                        $rWR    = (int)$r['cnt'] > 0 ? round((float)$r['wins'] / (int)$r['cnt'] * 100) : 0;
+                        $rTgt   = $getHistoricalDailyTarget($r['d']);
+                        if ($rTgt > 0 && $rPL >= $rTgt)  { $stClass='tg-status-hit';     $stLabel='✓ Hit'; }
+                        elseif ($rPL > 0 && $rTgt > 0)   { $stClass='tg-status-partial'; $stLabel='↑ Partial'; }
+                        elseif ($rPL > 0)                 { $stClass='tg-status-hit';     $stLabel='✓ Profit'; }
+                        elseif ($rPL < 0)                 { $stClass='tg-status-miss';    $stLabel='✗ Loss'; }
+                        else                              { $stClass='tg-status-none';    $stLabel='— Flat'; }
                     ?>
                     <tr>
                         <td style="font-weight:600;font-size:12px">
@@ -619,11 +735,11 @@ include '../includes/header.php';
                         </td>
                         <td>
                             <span style="font-family:'DM Mono',monospace;font-weight:700;color:<?= $rPL >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
-                                <?= ($rPL >= 0 ? '+' : '') ?>$<?= number_format($rPL, 2) ?>
+                                <?= formatPL($rPL) ?>
                             </span>
-                            <?php if ($dailyTarget > 0): ?>
+                            <?php if ($rTgt > 0): ?>
                             <div style="font-size:10px;color:var(--text-muted)">
-                                <?= round($rPL / $dailyTarget * 100) ?>% of $<?= number_format($dailyTarget, 0) ?>
+                                <?= round($rPL / $rTgt * 100) ?>% of <?= formatUSD($rTgt) ?>
                             </div>
                             <?php endif; ?>
                         </td>
@@ -649,6 +765,252 @@ include '../includes/header.php';
     <div style="font-size:13px;color:var(--text-muted)">Trade data will appear here once you log trades.</div>
 </div>
 <?php endif; ?>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- Target History Timeline -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="tg-section-lbl" style="margin-top:28px">
+    <i class="fas fa-clock-rotate-left" style="color:#6366f1;font-size:12px"></i>
+    Target History
+</div>
+
+<div class="tg-chart-card" style="margin-bottom:20px">
+<?php
+$timelineItems = array_reverse($tHistoryRows); // oldest → newest for timeline
+
+if (count($timelineItems)):
+?>
+    <!-- Vertical timeline -->
+    <div style="position:relative;padding-left:44px">
+        <!-- timeline spine -->
+        <div style="position:absolute;left:15px;top:8px;bottom:8px;width:2px;background:var(--border);border-radius:2px"></div>
+
+        <?php foreach ($timelineItems as $idx => $th):
+            $isActive = $th['effective_to'] === null;
+            $thFrom   = $th['effective_from'];
+            $thTo     = $th['effective_to'];
+            $thDays   = $thTo
+                ? (int)round((strtotime($thTo) - strtotime($thFrom)) / 86400) + 1
+                : (int)round((time() - strtotime($thFrom)) / 86400) + 1;
+            $isLast   = ($idx === count($timelineItems) - 1);
+            $dotBg    = $isActive ? '#22c55e' : '#64748b';
+            $cardBg   = $isActive ? 'rgba(34,197,94,.07)' : 'var(--bg-base)';
+            $cardBdr  = $isActive ? 'rgba(34,197,94,.35)' : 'var(--border)';
+            $periodLabel = 'Period ' . ($idx + 1);
+        ?>
+        <div style="position:relative;margin-bottom:<?= $isLast ? '0' : '16px' ?>">
+            <!-- dot on spine -->
+            <div style="position:absolute;left:-36px;top:16px;width:16px;height:16px;border-radius:50%;
+                        background:<?= $dotBg ?>;border:3px solid var(--bg-card);
+                        box-shadow:0 0 0 2px <?= $dotBg ?>">
+                <?php if ($isActive): ?>
+                <div class="tg-live-dot" style="position:absolute;inset:-4px;border-radius:50%;background:rgba(34,197,94,.25)"></div>
+                <?php endif; ?>
+            </div>
+
+            <!-- card -->
+            <div style="background:<?= $cardBg ?>;border:1.5px solid <?= $cardBdr ?>;border-radius:14px;padding:16px 18px">
+
+                <!-- card header -->
+                <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+                    <?php if ($isActive): ?>
+                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(34,197,94,.15);
+                                 color:#16a34a;font-size:10px;font-weight:800;padding:3px 10px;
+                                 border-radius:20px;text-transform:uppercase;letter-spacing:.07em">
+                        <span class="tg-live-dot" style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block"></span>
+                        Current Target
+                    </span>
+                    <?php else: ?>
+                    <span style="font-size:10px;font-weight:700;color:var(--text-muted);
+                                 text-transform:uppercase;letter-spacing:.07em;
+                                 background:var(--border);padding:3px 10px;border-radius:20px">
+                        <?= $periodLabel ?>
+                    </span>
+                    <?php endif; ?>
+
+                    <!-- date range -->
+                    <div style="margin-left:auto;text-align:right">
+                        <div style="font-size:12px;font-weight:700">
+                            <?= date('d M Y', strtotime($thFrom)) ?>
+                            <span style="color:var(--text-muted);font-weight:400;margin:0 4px">→</span>
+                            <?php if ($isActive): ?>
+                            <span style="color:#22c55e">Present</span>
+                            <?php else: ?>
+                            <?= date('d M Y', strtotime($thTo)) ?>
+                            <?php endif; ?>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px">
+                            <?= $thDays ?> day<?= $thDays !== 1 ? 's' : '' ?> active
+                        </div>
+                    </div>
+                </div>
+
+                <!-- target values grid -->
+                <?php
+                $cs_tgt = getActiveCurrency()['symbol'];
+                $tFields = [
+                    ['Daily',   $th['daily_pl_target'],   $cs_tgt, '#2563eb', 'fa-sun'],
+                    ['Weekly',  $th['weekly_pl_target'],  $cs_tgt, '#8b5cf6', 'fa-calendar-week'],
+                    ['Monthly', $th['monthly_pl_target'], $cs_tgt, '#f59e0b', 'fa-calendar-days'],
+                    ['Win Rate',$th['win_rate_target'],   '%',     '#22c55e', 'fa-bullseye'],
+                ];
+                ?>
+                <div class="tg-hist-grid">
+                    <?php foreach ($tFields as [$lbl, $val, $unit, $clr, $ico]):
+                        $hasVal  = (float)$val > 0;
+                        $display = $hasVal ? ($unit !== '%' ? $unit.number_format($val,2) : number_format($val,1).'%') : 'Not set';
+                    ?>
+                    <div style="background:var(--bg-card);border-radius:10px;padding:10px 12px;border:1px solid var(--border)">
+                        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+                            <i class="fas <?= $ico ?>" style="font-size:9px;color:<?= $clr ?>"></i>
+                            <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)"><?= $lbl ?></span>
+                        </div>
+                        <div style="font-size:15px;font-weight:800;font-family:'DM Mono',monospace;color:<?= $hasVal ? $clr : 'var(--text-muted)' ?>">
+                            <?= $display ?>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+
+<?php else: ?>
+    <!-- No history yet: show current settings as the starting point -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <div style="width:12px;height:12px;border-radius:50%;background:#22c55e;
+                    box-shadow:0 0 0 3px rgba(34,197,94,.2);flex-shrink:0"></div>
+        <div style="font-size:13px;font-weight:700">Current Target Settings</div>
+        <span style="background:rgba(34,197,94,.15);color:#16a34a;font-size:10px;font-weight:800;
+                     padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:.06em">Active</span>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:auto">
+            History begins recording after your next save
+        </span>
+    </div>
+
+    <?php if ($hasTargets): ?>
+    <div style="background:rgba(34,197,94,.07);border:1.5px solid rgba(34,197,94,.35);border-radius:14px;padding:16px 18px">
+        <?php
+        $cs_cur = getActiveCurrency()['symbol'];
+        $curFields = [
+            ['Daily',   $targets['daily_pl_target'],   $cs_cur, '#2563eb', 'fa-sun'],
+            ['Weekly',  $targets['weekly_pl_target'],  $cs_cur, '#8b5cf6', 'fa-calendar-week'],
+            ['Monthly', $targets['monthly_pl_target'], $cs_cur, '#f59e0b', 'fa-calendar-days'],
+            ['Win Rate',$targets['win_rate_target'],   '%',     '#22c55e', 'fa-bullseye'],
+        ];
+        ?>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+            <?php foreach ($curFields as [$lbl, $val, $unit, $clr, $ico]):
+                $hasVal  = (float)$val > 0;
+                $display = $hasVal ? ($unit !== '%' ? $unit.number_format($val,2) : number_format($val,1).'%') : 'Not set';
+            ?>
+            <div style="background:var(--bg-card);border-radius:10px;padding:10px 12px;border:1px solid var(--border)">
+                <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+                    <i class="fas <?= $ico ?>" style="font-size:9px;color:<?= $clr ?>"></i>
+                    <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)"><?= $lbl ?></span>
+                </div>
+                <div style="font-size:15px;font-weight:800;font-family:'DM Mono',monospace;color:<?= $hasVal ? $clr : 'var(--text-muted)' ?>">
+                    <?= $display ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php else: ?>
+    <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">
+        No targets set yet. Click <strong>Set Targets</strong> to define your goals.
+    </div>
+    <?php endif; ?>
+<?php endif; ?>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- Achievement Tracker -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="tg-section-lbl" style="margin-top:28px">
+    <i class="fas fa-trophy" style="color:#f59e0b;font-size:12px"></i>
+    Target Achievement Tracker
+</div>
+
+<div class="tg-tracker-grid">
+    <!-- Weekly -->
+    <div class="tg-chart-card" style="margin-bottom:0">
+        <div class="tg-chart-hdr">
+            <div class="tg-chart-title">
+                <i class="fas fa-calendar-week" style="color:#2563eb"></i> Weekly P&L
+                <?php if ($wkTargetVal > 0): ?>
+                <span style="font-size:11px;font-weight:500;color:var(--text-muted)">Target <?= formatUSD($wkTargetVal) ?>/wk</span>
+                <?php endif; ?>
+            </div>
+            <div style="display:flex;gap:8px;font-size:10px;color:var(--text-muted)">
+                <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#22c55e;display:inline-block"></span>Hit</span>
+                <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#f59e0b;display:inline-block"></span>Partial</span>
+                <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#ef4444;display:inline-block"></span>Miss</span>
+            </div>
+        </div>
+        <?php if (count($wkLabels)): ?>
+        <div style="position:relative;height:170px"><canvas id="weeklyChart"></canvas></div>
+        <?php else: ?>
+        <div style="height:170px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px">No weekly data yet</div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Monthly -->
+    <div class="tg-chart-card" style="margin-bottom:0">
+        <div class="tg-chart-hdr">
+            <div class="tg-chart-title">
+                <i class="fas fa-calendar-days" style="color:#8b5cf6"></i> Monthly P&L
+                <?php if ($moTargetVal > 0): ?>
+                <span style="font-size:11px;font-weight:500;color:var(--text-muted)">Target <?= formatUSD($moTargetVal) ?>/mo</span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php if (count($moLabels)): ?>
+        <div style="position:relative;height:170px"><canvas id="monthlyChart"></canvas></div>
+        <?php else: ?>
+        <div style="height:170px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px">No monthly data yet</div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- Yearly progress bar -->
+<div class="tg-chart-card">
+    <div class="tg-chart-hdr">
+        <div class="tg-chart-title">
+            <i class="fas fa-calendar" style="color:#22c55e"></i> <?= date('Y') ?> Yearly Progress
+        </div>
+        <?php if ($yearlyTarget > 0): ?>
+        <span style="font-size:11px;color:var(--text-muted)"><?= formatUSD($moTargetVal) ?>/mo × 12 = <?= formatUSD($yearlyTarget) ?> goal</span>
+        <?php endif; ?>
+    </div>
+    <?php if ($yearlyTarget > 0): ?>
+    <div style="display:flex;align-items:center;gap:24px">
+        <div style="flex:1">
+            <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:8px">
+                <span style="color:var(--text-muted)">YTD Net P&L (<?= date('Y') ?>)</span>
+                <span style="color:<?= $ytdColor ?>;font-family:'DM Mono',monospace"><?= formatPL($ytdPL) ?></span>
+            </div>
+            <div style="height:12px;background:var(--bg-body);border-radius:99px;overflow:hidden">
+                <div style="height:100%;width:<?= round($ytdPct,1) ?>%;background:<?= $ytdColor ?>;border-radius:99px;transition:width .8s ease"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:5px">
+                <span><?= round($ytdPct,1) ?>% of <?= formatUSD($yearlyTarget) ?> yearly goal</span>
+                <span><?php if ($ytdPL < $yearlyTarget): ?><?= formatUSD($yearlyTarget - $ytdPL) ?> to go<?php else: ?>Goal achieved! <?php endif; ?></span>
+            </div>
+        </div>
+        <div style="text-align:center;flex-shrink:0;min-width:64px">
+            <div style="font-size:30px;font-weight:800;font-family:'DM Mono',monospace;color:<?= $ytdColor ?>;line-height:1"><?= round($ytdPct) ?>%</div>
+            <div style="font-size:10px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:4px">of year goal</div>
+        </div>
+    </div>
+    <?php else: ?>
+    <div style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px">
+        Set a monthly target to enable yearly tracking.
+    </div>
+    <?php endif; ?>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 <!-- Set Targets Modal -->
@@ -682,7 +1044,7 @@ include '../includes/header.php';
                             <div class="tg-input-group">
                                 <div class="tg-input-lbl"><i class="fas fa-sun me-1" style="color:#f59e0b"></i>Daily Target</div>
                                 <div class="input-group mt-1">
-                                    <span class="input-group-text" style="background:var(--bg-card);border-color:transparent;color:var(--text-muted);padding:0 8px">$</span>
+                                    <span class="input-group-text" style="background:var(--bg-card);border-color:transparent;color:var(--text-muted);padding:0 8px"><?= getActiveCurrency()['symbol'] ?></span>
                                     <input type="number" name="daily_pl_target" class="form-control" step="0.01" min="0"
                                            value="<?= htmlspecialchars($targets['daily_pl_target']) ?>"
                                            placeholder="0.00"
@@ -695,7 +1057,7 @@ include '../includes/header.php';
                             <div class="tg-input-group">
                                 <div class="tg-input-lbl"><i class="fas fa-calendar-week me-1" style="color:#2563eb"></i>Weekly Target</div>
                                 <div class="input-group mt-1">
-                                    <span class="input-group-text" style="background:var(--bg-card);border-color:transparent;color:var(--text-muted);padding:0 8px">$</span>
+                                    <span class="input-group-text" style="background:var(--bg-card);border-color:transparent;color:var(--text-muted);padding:0 8px"><?= getActiveCurrency()['symbol'] ?></span>
                                     <input type="number" name="weekly_pl_target" class="form-control" step="0.01" min="0"
                                            value="<?= htmlspecialchars($targets['weekly_pl_target']) ?>"
                                            placeholder="0.00"
@@ -708,7 +1070,7 @@ include '../includes/header.php';
                             <div class="tg-input-group">
                                 <div class="tg-input-lbl"><i class="fas fa-calendar-days me-1" style="color:#f59e0b"></i>Monthly Target</div>
                                 <div class="input-group mt-1">
-                                    <span class="input-group-text" style="background:var(--bg-card);border-color:transparent;color:var(--text-muted);padding:0 8px">$</span>
+                                    <span class="input-group-text" style="background:var(--bg-card);border-color:transparent;color:var(--text-muted);padding:0 8px"><?= getActiveCurrency()['symbol'] ?></span>
                                     <input type="number" name="monthly_pl_target" class="form-control" step="0.01" min="0"
                                            value="<?= htmlspecialchars($targets['monthly_pl_target']) ?>"
                                            placeholder="0.00"
@@ -779,17 +1141,19 @@ include '../includes/header.php';
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {
+    const CS     = <?= json_encode(getActiveCurrency()['symbol']) ?>;
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const gridC  = isDark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)';
     const textC  = isDark ? '#94a3b8' : '#64748b';
 
-    const dates      = <?= json_encode($chartDates) ?>;
-    const cumActual  = <?= json_encode($chartCumActual) ?>;
-    const cumTarget  = <?= json_encode($chartCumTarget) ?>;
-    const dailyPL    = <?= json_encode($chartDailyPL) ?>;
-    const barBg      = <?= json_encode($chartBarColors) ?>;
-    const barBorder  = <?= json_encode($chartBarBorder) ?>;
-    const dailyTgt   = <?= json_encode($dailyTarget) ?>;
+    const dates        = <?= json_encode($chartDates) ?>;
+    const cumActual    = <?= json_encode($chartCumActual) ?>;
+    const cumTarget    = <?= json_encode($chartCumTarget) ?>;
+    const dailyPL      = <?= json_encode($chartDailyPL) ?>;
+    const barBg        = <?= json_encode($chartBarColors) ?>;
+    const barBorder    = <?= json_encode($chartBarBorder) ?>;
+    const dailyTgt     = <?= json_encode($dailyTarget) ?>;
+    const dailyTargets = <?= json_encode($chartDailyTargets) ?>;
 
     // ── Cumulative Curve Chart ────────────────────────────────────────────────
     const cvCtx = document.getElementById('curveChart');
@@ -853,7 +1217,7 @@ include '../includes/header.php';
                             label: ctx => {
                                 const lbl = ctx.dataset.label;
                                 const v   = ctx.parsed.y;
-                                return ' ' + lbl + ': ' + (v >= 0 ? '+' : '') + '$' + v.toFixed(2);
+                                return ' ' + lbl + ': ' + (v >= 0 ? '+' : '') + CS + v.toFixed(2);
                             }
                         }
                     }
@@ -862,7 +1226,7 @@ include '../includes/header.php';
                     x: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},maxTicksLimit:12,maxRotation:30} },
                     y: {
                         grid:{color:gridC},
-                        ticks:{color:textC,font:{size:10},callback:v=>'$'+v},
+                        ticks:{color:textC,font:{size:10},callback:v=>CS+v},
                         afterDataLimits(axis) {
                             const pad = (axis.max - axis.min) * 0.08 || 10;
                             axis.min -= pad; axis.max += pad;
@@ -886,16 +1250,17 @@ include '../includes/header.php';
             borderSkipped: false,
         }];
 
-        // Daily target reference line
-        if (dailyTgt > 0) {
+        // Daily target reference line — uses per-day historical targets, steps when target changes
+        if (dailyTargets.some(v => v > 0)) {
             datasets.push({
                 label: 'Daily Target',
-                data: Array(dates.length).fill(dailyTgt),
+                data: dailyTargets,
                 type: 'line',
                 borderColor: '#f59e0b',
                 borderWidth: 2,
                 borderDash: [5, 4],
                 pointRadius: 0,
+                stepped: 'before',
                 fill: false,
             });
         }
@@ -919,8 +1284,10 @@ include '../includes/header.php';
                         callbacks: {
                             label: ctx => {
                                 const v = ctx.parsed.y;
-                                if (ctx.dataset.label === 'Daily Target') return ' Target: $' + v.toFixed(2);
-                                return ' Net P&L: ' + (v >= 0 ? '+' : '') + '$' + v.toFixed(2);
+                                if (ctx.dataset.label === 'Daily Target') return ' Target: ' + CS + v.toFixed(2);
+                                const tgt = dailyTargets[ctx.dataIndex] ?? 0;
+                                const pct = tgt > 0 ? ' (' + Math.round(v/tgt*100) + '% of ' + CS + tgt.toFixed(0) + ')' : '';
+                                return ' Net P&L: ' + (v >= 0 ? '+' : '') + CS + v.toFixed(2) + pct;
                             }
                         }
                     }
@@ -929,12 +1296,111 @@ include '../includes/header.php';
                     x: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},maxTicksLimit:14,maxRotation:45} },
                     y: {
                         grid:{color:gridC},
-                        ticks:{color:textC,font:{size:10},callback:v=>'$'+v},
+                        ticks:{color:textC,font:{size:10},callback:v=>CS+v},
                     }
                 }
             }
         });
     }
+
+    // ── Weekly Achievement Chart ──────────────────────────────────────────────
+    const wkLabels = <?= json_encode($wkLabels) ?>;
+    const wkPLs    = <?= json_encode($wkPLs) ?>;
+    const wkColors = <?= json_encode($wkColors) ?>;
+    const wkTarget = <?= json_encode($wkTargetVal) ?>;
+    const wkTrades = <?= json_encode($wkTrades) ?>;
+
+    const wkCtx = document.getElementById('weeklyChart');
+    if (wkCtx && wkLabels.length) {
+        const wkDS = [{
+            label: 'Weekly P&L',
+            data: wkPLs,
+            backgroundColor: wkColors.map(c => c + 'bb'),
+            borderColor: wkColors,
+            borderWidth: 1.5,
+            borderRadius: 5,
+            borderSkipped: false,
+        }];
+        if (wkTarget > 0) wkDS.push({
+            label: 'Target', data: Array(wkLabels.length).fill(wkTarget),
+            type: 'line', borderColor: '#f59e0b', borderWidth: 1.5,
+            borderDash: [5,4], pointRadius: 0, fill: false,
+        });
+        new Chart(wkCtx, { type: 'bar', data: { labels: wkLabels, datasets: wkDS },
+            options: { responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { display: false },
+                    tooltip: { backgroundColor: isDark?'#1e293b':'#fff', borderColor: isDark?'#334155':'#e2e8f0',
+                        borderWidth:1, titleColor:textC, bodyColor: isDark?'#cbd5e1':'#475569', padding:10,
+                        callbacks: {
+                            label: ctx => {
+                                if (ctx.dataset.label === 'Target') return ' Target: ' + CS + ctx.parsed.y.toFixed(2);
+                                const v = ctx.parsed.y;
+                                const pct = wkTarget > 0 ? ' (' + Math.round(v/wkTarget*100) + '% of target)' : '';
+                                return ' P&L: ' + (v>=0?'+':'') + CS + v.toFixed(2) + pct;
+                            },
+                            afterLabel: ctx => ctx.dataset.label === 'Target' ? '' : ' Trades: ' + (wkTrades[ctx.dataIndex] ?? 0)
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid:{color:gridC}, ticks:{color:textC,font:{size:10}} },
+                    y: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},callback:v=>CS+v},
+                        afterDataLimits(a){ const p=(a.max-a.min)*.12||5; a.min-=p; a.max+=p; } }
+                }
+            }
+        });
+    }
+
+    // ── Monthly Achievement Chart ─────────────────────────────────────────────
+    const moLabels = <?= json_encode($moLabels) ?>;
+    const moPLs    = <?= json_encode($moPLs) ?>;
+    const moColors = <?= json_encode($moColors) ?>;
+    const moTarget = <?= json_encode($moTargetVal) ?>;
+    const moTrades = <?= json_encode($moTrades) ?>;
+
+    const moCtx = document.getElementById('monthlyChart');
+    if (moCtx && moLabels.length) {
+        const moDS = [{
+            label: 'Monthly P&L',
+            data: moPLs,
+            backgroundColor: moColors.map(c => c + 'bb'),
+            borderColor: moColors,
+            borderWidth: 1.5,
+            borderRadius: 5,
+            borderSkipped: false,
+        }];
+        if (moTarget > 0) moDS.push({
+            label: 'Target', data: Array(moLabels.length).fill(moTarget),
+            type: 'line', borderColor: '#8b5cf6', borderWidth: 1.5,
+            borderDash: [5,4], pointRadius: 0, fill: false,
+        });
+        new Chart(moCtx, { type: 'bar', data: { labels: moLabels, datasets: moDS },
+            options: { responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { display: false },
+                    tooltip: { backgroundColor: isDark?'#1e293b':'#fff', borderColor: isDark?'#334155':'#e2e8f0',
+                        borderWidth:1, titleColor:textC, bodyColor: isDark?'#cbd5e1':'#475569', padding:10,
+                        callbacks: {
+                            label: ctx => {
+                                if (ctx.dataset.label === 'Target') return ' Target: ' + CS + ctx.parsed.y.toFixed(2);
+                                const v = ctx.parsed.y;
+                                const pct = moTarget > 0 ? ' (' + Math.round(v/moTarget*100) + '% of goal)' : '';
+                                return ' P&L: ' + (v>=0?'+':'') + CS + v.toFixed(2) + pct;
+                            },
+                            afterLabel: ctx => ctx.dataset.label === 'Target' ? '' : ' Trades: ' + (moTrades[ctx.dataIndex] ?? 0)
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid:{color:gridC}, ticks:{color:textC,font:{size:10}} },
+                    y: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},callback:v=>CS+v},
+                        afterDataLimits(a){ const p=(a.max-a.min)*.12||5; a.min-=p; a.max+=p; } }
+                }
+            }
+        });
+    }
+
 })();
 </script>
 

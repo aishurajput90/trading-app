@@ -66,7 +66,7 @@ $weekPL->execute([$userId, $weekStart, $weekEnd]);
 $weekPLVal = $weekPL->fetch()['wpl'];
 
 // -- Current capital cycle breakdown --
-$lastSOStmt = $db->prepare("SELECT * FROM transactions WHERE user_id=? AND type='stop_out' ORDER BY created_at DESC LIMIT 1");
+$lastSOStmt = $db->prepare("SELECT * FROM transactions WHERE user_id=? AND type='stop_out' ORDER BY date DESC, created_at DESC LIMIT 1");
 $lastSOStmt->execute([$userId]);
 $lastSO = $lastSOStmt->fetch();
 
@@ -75,17 +75,17 @@ $cycleWithdraw = 0.0;
 $cyclePL       = 0.0;
 
 if ($lastSO) {
-    $soCreatedAt = $lastSO['created_at'];
+    $soDate = $lastSO['date']; // business date — same boundary used by getCurrentBalance
 
-    $cycleTxStmt = $db->prepare("SELECT type, amount FROM transactions WHERE user_id=? AND type IN ('deposit','withdraw') AND created_at > ?");
-    $cycleTxStmt->execute([$userId, $soCreatedAt]);
+    $cycleTxStmt = $db->prepare("SELECT type, amount FROM transactions WHERE user_id=? AND type IN ('deposit','withdraw') AND date > ?");
+    $cycleTxStmt->execute([$userId, $soDate]);
     foreach ($cycleTxStmt->fetchAll() as $tx) {
         if ($tx['type'] === 'deposit')  $cycleDeposits += (float)$tx['amount'];
         if ($tx['type'] === 'withdraw') $cycleWithdraw += (float)$tx['amount'];
     }
 
-    $cyclePLStmt = $db->prepare("SELECT COALESCE(SUM(profit_loss - brokerage + swap),0) as total FROM trades WHERE user_id=? AND trade_datetime > ?");
-    $cyclePLStmt->execute([$userId, $soCreatedAt]);
+    $cyclePLStmt = $db->prepare("SELECT COALESCE(SUM(profit_loss - brokerage + swap),0) as total FROM trades WHERE user_id=? AND DATE(trade_datetime) > ?");
+    $cyclePLStmt->execute([$userId, $soDate]);
     $cyclePL = (float)$cyclePLStmt->fetch()['total'];
 }
 
@@ -127,7 +127,7 @@ include 'includes/header.php';
 <div class="risk-alert risk-alert-breach mb-4">
     <i class="fas fa-power-off fa-lg"></i>
     <div><strong>Account Stopped Out</strong><br>
-    <small>Balance has been set to $0.00. Go to Fund Manager to add new capital and resume trading.</small></div>
+    <small>Balance has been set to <?= formatUSD(0) ?>. Go to Fund Manager to add new capital and resume trading.</small></div>
 </div>
 <?php endif; ?>
 
@@ -499,7 +499,7 @@ $pc  = $maColors['purple'];
                 </div>
                 <hr class="divider">
                 <div class="metric-row"><span class="metric-label">Daily Max Loss Allowed</span><span class="metric-value text-loss">-<?= formatUSD($risk['daily_max_loss']) ?></span></div>
-                <div class="metric-row"><span class="metric-label">Loss Used Today</span><span class="metric-value <?= $risk['daily_loss_used'] > 0 ? 'text-loss' : '' ?>"><?= $risk['daily_loss_used'] > 0 ? '-'.formatUSD($risk['daily_loss_used']) : '$0.00' ?></span></div>
+                <div class="metric-row"><span class="metric-label">Loss Used Today</span><span class="metric-value <?= $risk['daily_loss_used'] > 0 ? 'text-loss' : '' ?>"><?= $risk['daily_loss_used'] > 0 ? '-'.formatUSD($risk['daily_loss_used']) : formatUSD(0) ?></span></div>
                 <div class="metric-row">
                     <span class="metric-label">Distance to Daily Breach</span>
                     <span class="metric-value <?= $risk['daily_distance_usd'] < 0 ? 'text-loss' : 'text-profit' ?>">
@@ -540,7 +540,7 @@ $pc  = $maColors['purple'];
                 </div>
                 <hr class="divider">
                 <div class="metric-row"><span class="metric-label">Weekly Max Loss Allowed</span><span class="metric-value text-loss">-<?= formatUSD($risk['weekly_max_loss']) ?></span></div>
-                <div class="metric-row"><span class="metric-label">Loss Used This Week</span><span class="metric-value <?= $risk['weekly_loss_used'] > 0 ? 'text-loss' : '' ?>"><?= $risk['weekly_loss_used'] > 0 ? '-'.formatUSD($risk['weekly_loss_used']) : '$0.00' ?></span></div>
+                <div class="metric-row"><span class="metric-label">Loss Used This Week</span><span class="metric-value <?= $risk['weekly_loss_used'] > 0 ? 'text-loss' : '' ?>"><?= $risk['weekly_loss_used'] > 0 ? '-'.formatUSD($risk['weekly_loss_used']) : formatUSD(0) ?></span></div>
                 <div class="metric-row">
                     <span class="metric-label">Distance to Weekly Breach</span>
                     <span class="metric-value <?= $risk['weekly_distance_usd'] < 0 ? 'text-loss' : 'text-profit' ?>">
@@ -790,7 +790,7 @@ $pc  = $maColors['purple'];
                 <div class="modal-body">
                     <div class="risk-alert risk-alert-breach mb-3" style="border-radius:var(--radius-sm)">
                         <i class="fas fa-ban"></i>
-                        <div><strong>This will set your balance to $0.00 immediately.</strong><br>
+                        <div><strong>This will set your balance to <?= formatUSD(0) ?> immediately.</strong><br>
                         <small>Current balance: <strong><?= formatUSD($risk['current_equity']) ?></strong>. All trades and history are preserved.</small></div>
                     </div>
                     <div class="row g-2 mb-3">

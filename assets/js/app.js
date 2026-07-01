@@ -63,11 +63,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!plPreview) return;
         const num = parseFloat(val);
         if (isNaN(num)) { plPreview.textContent = ''; plPreview.className = 'pl-preview'; return; }
+        const _cs = window.APP_CS || '$';
         if (num >= 0) {
-            plPreview.textContent = '+$' + Math.abs(num).toFixed(2);
+            plPreview.textContent = '+' + _cs + Math.abs(num).toFixed(2);
             plPreview.className = 'pl-preview positive';
         } else {
-            plPreview.textContent = '-$' + Math.abs(num).toFixed(2);
+            plPreview.textContent = '-' + _cs + Math.abs(num).toFixed(2);
             plPreview.className = 'pl-preview negative';
         }
     }
@@ -182,8 +183,8 @@ function createLineChart(canvasId, labels, data, label) {
                 tooltip: {
                     callbacks: {
                         label: ctx => {
-                            const v = ctx.raw;
-                            return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2);
+                            const v = ctx.raw; const _cs = window.APP_CS || '$';
+                            return (v >= 0 ? '+' : '-') + _cs + Math.abs(v).toFixed(2);
                         }
                     }
                 }
@@ -198,7 +199,7 @@ function createLineChart(canvasId, labels, data, label) {
                     ticks: {
                         color: colors.text,
                         font: { size: 11 },
-                        callback: v => (v >= 0 ? '+$' : '-$') + Math.abs(v)
+                        callback: v => { const _cs = window.APP_CS || '$'; return (v >= 0 ? '+' : '-') + _cs + Math.abs(v); }
                     }
                 }
             }
@@ -273,7 +274,7 @@ function createAreaChart(canvasId, labels, data, label) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: ctx => '$' + ctx.raw.toFixed(2)
+                        label: ctx => (window.APP_CS || '$') + ctx.raw.toFixed(2)
                     }
                 }
             },
@@ -287,7 +288,7 @@ function createAreaChart(canvasId, labels, data, label) {
                     ticks: {
                         color: colors.text,
                         font: { size: 11 },
-                        callback: v => '$' + v.toLocaleString()
+                        callback: v => (window.APP_CS || '$') + v.toLocaleString()
                     }
                 }
             }

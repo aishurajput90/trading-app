@@ -75,6 +75,18 @@ if (($_POST['action'] ?? '') === 'change_password') {
     }
 }
 
+// ── Handle Currency Change ───────────────────────────────────────────────────
+if (($_POST['action'] ?? '') === 'update_currency') {
+    $allowed  = array_keys(CURRENCY_CONFIG);
+    $currency = $_POST['currency'] ?? 'USD';
+    if (!in_array($currency, $allowed, true)) $currency = 'USD';
+    $db->prepare("UPDATE users SET currency = ? WHERE id = ?")->execute([$currency, $userId]);
+    $_SESSION['user_currency'] = $currency;
+    $user['currency'] = $currency;
+    $msg     = 'Currency preference saved. All values now display in ' . $currency . '.';
+    $msgType = 'success';
+}
+
 // ── Trade stats for the account summary ─────────────────────────────────────
 $statsRow = $db->prepare("SELECT COUNT(*) as tc, COALESCE(SUM(profit_loss - brokerage + swap),0) as net_pl FROM trades WHERE user_id=?");
 $statsRow->execute([$userId]);
@@ -131,6 +143,35 @@ include '../includes/header.php';
 
                     <button type="submit" class="btn btn-primary" style="border-radius:8px;font-weight:600">
                         <i class="fas fa-save me-1"></i>Save Changes
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Display Currency ──────────────────────────────────────────── -->
+    <div class="col-lg-6">
+        <div class="card-custom">
+            <div class="card-header-custom">
+                <i class="fas fa-coins me-2" style="color:var(--accent)"></i>Display Currency
+            </div>
+            <div style="padding:1.5rem">
+                <form method="POST">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="update_currency">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" style="font-size:.82rem">Preferred Currency</label>
+                        <select name="currency" class="form-select">
+                            <?php foreach (CURRENCY_CONFIG as $code => $cfg): ?>
+                                <option value="<?= $code ?>" <?= ($user['currency'] ?? 'USD') === $code ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($cfg['symbol']) ?> — <?= $code ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text">All monetary values across the app will use this symbol.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="border-radius:8px;font-weight:600">
+                        <i class="fas fa-check me-1"></i>Save Currency
                     </button>
                 </form>
             </div>

@@ -114,8 +114,8 @@ foreach ($trades as $t) {
     $csBgColors[]     = $win ? 'rgba(34,197,94,.78)' : 'rgba(239,68,68,.78)';
     $csBorderColors[] = $win ? '#16a34a' : '#dc2626';
     $csTooltips[]     = strtoupper($t['symbol']) . ' ' . strtoupper($t['trade_type'] ?? 'BUY')
-                        . '  |  ' . ($t['profit_loss'] >= 0 ? '+' : '') . '$' . number_format($t['profit_loss'], 2)
-                        . '  |  Net Δ ' . ($c >= $o ? '+' : '') . '$' . number_format($c - $o, 2);
+                        . '  |  ' . formatPL($t['profit_loss'])
+                        . '  |  Net Δ ' . formatPL($c - $o);
 }
 
 $reasonLabels = ['sl'=>'SL','tp'=>'TP','user'=>'Manual','so'=>'SO'];
@@ -149,7 +149,7 @@ if ($lastSOBefore) {
     $plStmt2->execute([$userId, $sinceDate, $date]);
     $balAtStart = (float)$txRow2['deps'] - (float)$txRow2['wds'] + (float)$plStmt2->fetch()['net_pl'];
 } else {
-    // No prior stop-out — sum everything before this date
+    // No prior stop-out — sum everything strictly before this date
     $txStmt2 = $db->prepare("
         SELECT COALESCE(SUM(CASE WHEN type='deposit'  THEN amount ELSE 0 END),0) AS deps,
                COALESCE(SUM(CASE WHEN type='withdraw' THEN amount ELSE 0 END),0) AS wds
@@ -166,9 +166,67 @@ if ($lastSOBefore) {
     $balAtStart = (float)$txRow2['deps'] - (float)$txRow2['wds'] + (float)$plStmt2->fetch()['net_pl'];
 }
 
+// Day Open = prior balance + same-day deposits/withdrawals made BEFORE the first trade.
+// Find the earliest open_time among today's trades as the cutoff.
+$firstOpenTime = null;
+foreach ($trades as $t) {
+    $ot = $t['open_time'] ?: $t['trade_datetime'];
+    if ($ot && ($firstOpenTime === null || $ot < $firstOpenTime)) {
+        $firstOpenTime = $ot;
+    }
+}
+
+if ($firstOpenTime) {
+    // Only include transactions entered before (or at) the first trade's open time
+    $sdStmt = $db->prepare("
+        SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount
+                                 WHEN type='withdraw' THEN -amount ELSE 0 END), 0) AS sd_tx
+        FROM transactions
+        WHERE user_id=? AND type IN ('deposit','withdraw') AND date=? AND created_at <= ?
+    ");
+    $sdStmt->execute([$userId, $date, $firstOpenTime]);
+} else {
+    // No open_time available — include all same-day transactions
+    $sdStmt = $db->prepare("
+        SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount
+                                 WHEN type='withdraw' THEN -amount ELSE 0 END), 0) AS sd_tx
+        FROM transactions
+        WHERE user_id=? AND type IN ('deposit','withdraw') AND date=?
+    ");
+    $sdStmt->execute([$userId, $date]);
+}
+$balAtStart += (float)$sdStmt->fetch()['sd_tx'];
+
 $peakCapital   = empty($runningEq) ? $balAtStart : ($balAtStart + max($runningEq));
 $troughCapital = empty($runningEq) ? $balAtStart : ($balAtStart + min($runningEq));
 $closeCapital  = $balAtStart + $netPL;
+
+$netPLPct      = $balAtStart > 0 ? round($netPL / $balAtStart * 100, 2) : 0;
+$peakGainPct   = $balAtStart > 0 ? round(($peakCapital   - $balAtStart) / $balAtStart * 100, 2) : 0;
+$troughLossPct = $balAtStart > 0 ? round(($troughCapital - $balAtStart) / $balAtStart * 100, 2) : 0;
+
+// ── Trade sequence (T1…Tn) ───────────────────────────────────────────────────
+$seqRows    = [];
+$seqCum     = 0.0;
+$seqPeakVal = PHP_INT_MIN;
+$seqPeakPos = null;
+$seqNegPos  = null;   // first trade where cumulative went negative
+foreach ($trades as $i => $t) {
+    $net    = round((float)$t['profit_loss'] - (float)$t['brokerage'] + (float)$t['swap'], 2);
+    $seqCum = round($seqCum + $net, 2);
+    $pos    = $i + 1;
+    $seqRows[] = [
+        'pos'    => $pos,
+        'net'    => $net,
+        'cum'    => $seqCum,
+        'symbol' => strtoupper($t['symbol']),
+        'type'   => strtoupper($t['trade_type'] ?? ''),
+        'time'   => date('H:i', strtotime($t['trade_datetime'])),
+        'reason' => strtolower($t['close_reason'] ?? ''),
+    ];
+    if ($seqCum > $seqPeakVal) { $seqPeakVal = $seqCum; $seqPeakPos = $pos; }
+    if ($seqNegPos === null && $seqCum < 0) $seqNegPos = $pos;
+}
 
 $pageTitle = 'Day Detail — ' . date('d M Y', $ts);
 $rootPath  = '../';
@@ -295,50 +353,58 @@ include '../includes/header.php';
     <div class="day-kpi">
         <div class="day-kpi-lbl">Gross P&amp;L</div>
         <div class="day-kpi-val <?= $grossPL >= 0 ? 'pos' : 'neg' ?>">
-            <?= ($grossPL >= 0 ? '+' : '') ?>$<?= number_format($grossPL, 2) ?>
+            <?= formatPL($grossPL) ?>
         </div>
         <div class="day-kpi-sub">Before charges</div>
     </div>
     <div class="day-kpi">
         <div class="day-kpi-lbl">Brokerage</div>
-        <div class="day-kpi-val neg">-$<?= number_format($totalBrok, 2) ?></div>
+        <div class="day-kpi-val neg">-<?= formatUSD($totalBrok) ?></div>
         <div class="day-kpi-sub">Commission</div>
     </div>
     <div class="day-kpi">
         <div class="day-kpi-lbl">Swap</div>
         <div class="day-kpi-val <?= $totalSwap >= 0 ? 'pos' : 'neg' ?>">
-            <?= ($totalSwap >= 0 ? '+' : '') ?>$<?= number_format($totalSwap, 2) ?>
+            <?= formatPL($totalSwap) ?>
         </div>
         <div class="day-kpi-sub">Overnight</div>
     </div>
     <div class="day-kpi" style="border-color:<?= $netPL >= 0 ? 'rgba(22,163,74,.4)' : 'rgba(220,38,38,.4)' ?>">
         <div class="day-kpi-lbl">Net P&amp;L</div>
         <div class="day-kpi-val <?= $netPL >= 0 ? 'pos' : 'neg' ?>" style="font-size:22px">
-            <?= ($netPL >= 0 ? '+' : '') ?>$<?= number_format($netPL, 2) ?>
+            <?= formatPL($netPL) ?>
         </div>
-        <div class="day-kpi-sub">After all charges</div>
+        <div class="day-kpi-sub">
+            After all charges
+            <span style="display:block;font-size:12px;font-weight:700;margin-top:2px;color:<?= $netPL >= 0 ? 'var(--profit)' : 'var(--loss)' ?>">
+                <?= ($netPLPct >= 0 ? '+' : '') . $netPLPct ?>% of capital
+            </span>
+        </div>
     </div>
     <div class="day-kpi">
         <div class="day-kpi-lbl">Best Trade</div>
         <div class="day-kpi-val <?= $bestTrade >= 0 ? 'pos' : 'neg' ?>">
-            <?= ($bestTrade >= 0 ? '+' : '') ?>$<?= number_format($bestTrade, 2) ?>
+            <?= formatPL($bestTrade) ?>
         </div>
         <div class="day-kpi-sub">Single best</div>
     </div>
     <div class="day-kpi">
         <div class="day-kpi-lbl">Worst Trade</div>
-        <div class="day-kpi-val neg">$<?= number_format($worstLoss, 2) ?></div>
+        <div class="day-kpi-val neg"><?= formatUSD($worstLoss) ?></div>
         <div class="day-kpi-sub">Single worst</div>
     </div>
     <div class="day-kpi">
         <div class="day-kpi-lbl">Avg Win</div>
-        <div class="day-kpi-val pos">+$<?= $avgWin ?></div>
+        <div class="day-kpi-val pos">+<?= getActiveCurrency()['symbol'] ?><?= $avgWin ?></div>
         <div class="day-kpi-sub"><?= $wins ?> winning trades</div>
     </div>
-    <div class="day-kpi" style="border-color:rgba(22,163,74,.4);background:rgba(22,163,74,.03)">
-        <div class="day-kpi-lbl" style="color:var(--profit)"><i class="fas fa-arrow-trend-up"></i> Peak Capital</div>
-        <div class="day-kpi-val pos">$<?= number_format($peakCapital, 2) ?></div>
-        <div class="day-kpi-sub">+$<?= number_format($peakCapital - $balAtStart, 2) ?> from open</div>
+    <?php $peakAboveOpen = $peakCapital >= $balAtStart; ?>
+    <div class="day-kpi" style="border-color:<?= $peakAboveOpen ? 'rgba(22,163,74,.4)' : 'rgba(220,38,38,.4)' ?>;background:<?= $peakAboveOpen ? 'rgba(22,163,74,.03)' : 'rgba(220,38,38,.03)' ?>">
+        <div class="day-kpi-lbl" style="color:<?= $peakAboveOpen ? 'var(--profit)' : 'var(--loss)' ?>"><i class="fas fa-arrow-trend-up"></i> Peak Capital</div>
+        <div class="day-kpi-val <?= $peakAboveOpen ? 'pos' : 'neg' ?>"><?= formatUSD($peakCapital) ?></div>
+        <div class="day-kpi-sub">
+            <?= $peakAboveOpen ? '+' : '-' ?><?= formatUSD(abs($peakCapital - $balAtStart)) ?> <?= $peakAboveOpen ? 'above' : 'below' ?> open
+        </div>
     </div>
     <?php if ($avgDurSec !== null): ?>
     <div class="day-kpi">
@@ -370,32 +436,38 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
                 <i class="fas fa-circle" style="color:var(--accent);font-size:8px"></i> Day Open
             </div>
             <div style="font-family:var(--font-mono);font-size:17px;font-weight:700;color:var(--text-primary)">
-                $<?= number_format($balAtStart, 2) ?>
+                <?= formatUSD($balAtStart) ?>
             </div>
             <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Before first trade</div>
         </div>
-        <div style="padding:16px 12px;border-right:1px solid var(--border-light);background:rgba(22,163,74,.05)">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--profit);margin-bottom:6px">
-                <i class="fas fa-arrow-up" style="font-size:8px"></i> Highest Reached
+        <div style="padding:16px 12px;border-right:1px solid var(--border-light);background:<?= $peakAboveOpen ? 'rgba(22,163,74,.05)' : 'rgba(220,38,38,.04)' ?>">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:<?= $peakAboveOpen ? 'var(--profit)' : 'var(--loss)' ?>;margin-bottom:6px">
+                <i class="fas fa-<?= $peakAboveOpen ? 'arrow-up' : 'arrow-down' ?>" style="font-size:8px"></i> Highest Reached
             </div>
-            <div style="font-family:var(--font-mono);font-size:17px;font-weight:800;color:var(--profit)">
-                $<?= number_format($peakCapital, 2) ?>
+            <div style="font-family:var(--font-mono);font-size:17px;font-weight:800;color:<?= $peakAboveOpen ? 'var(--profit)' : 'var(--loss)' ?>">
+                <?= formatUSD($peakCapital) ?>
             </div>
             <div style="font-size:10px;color:var(--text-muted);margin-top:4px">
-                +$<?= number_format($peakCapital - $balAtStart, 2) ?> above open
+                <?= $peakAboveOpen ? '+' : '-' ?><?= formatUSD(abs($peakCapital - $balAtStart)) ?> <?= $peakAboveOpen ? 'above' : 'below' ?> open
+                <span style="color:<?= $peakAboveOpen ? 'var(--profit)' : 'var(--loss)' ?>;font-weight:700">
+                    (<?= ($peakGainPct >= 0 ? '+' : '') . $peakGainPct ?>%)
+                </span>
             </div>
         </div>
-        <div style="padding:16px 12px;border-right:1px solid var(--border-light);background:rgba(220,38,38,.04)">
+        <div style="padding:16px 12px;border-right:1px solid var(--border-light);background:rgba(220,38,68,.04)">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--loss);margin-bottom:6px">
                 <i class="fas fa-arrow-down" style="font-size:8px"></i> Lowest Reached
             </div>
             <div style="font-family:var(--font-mono);font-size:17px;font-weight:700;color:var(--loss)">
-                $<?= number_format($troughCapital, 2) ?>
+                <?= formatUSD($troughCapital) ?>
             </div>
             <div style="font-size:10px;color:var(--text-muted);margin-top:4px">
                 <?= $troughCapital < $balAtStart
-                    ? '-$' . number_format($balAtStart - $troughCapital, 2) . ' below open'
-                    : '+$' . number_format($troughCapital - $balAtStart, 2) . ' above open' ?>
+                    ? '-' . formatUSD($balAtStart - $troughCapital) . ' below open'
+                    : '+' . formatUSD($troughCapital - $balAtStart) . ' above open' ?>
+                <span style="color:<?= $troughLossPct >= 0 ? 'var(--profit)' : 'var(--loss)' ?>;font-weight:700">
+                    (<?= ($troughLossPct >= 0 ? '+' : '') . $troughLossPct ?>%)
+                </span>
             </div>
         </div>
         <div style="padding:16px 12px;background:<?= $closeCapital >= $balAtStart ? 'rgba(22,163,74,.05)' : 'rgba(220,38,38,.04)' ?>">
@@ -403,10 +475,13 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
                 <i class="fas fa-flag-checkered" style="font-size:8px"></i> Day Close
             </div>
             <div style="font-family:var(--font-mono);font-size:17px;font-weight:800;color:<?= $closeColor ?>">
-                $<?= number_format($closeCapital, 2) ?>
+                <?= formatUSD($closeCapital) ?>
             </div>
             <div style="font-size:10px;color:var(--text-muted);margin-top:4px">
-                <?= $closeCapital >= $balAtStart ? '+' : '-' ?>$<?= number_format(abs($closeCapital - $balAtStart), 2) ?> net
+                <?= $closeCapital >= $balAtStart ? '+' : '-' ?><?= formatUSD(abs($closeCapital - $balAtStart)) ?> net
+                <span style="color:<?= $netPL >= 0 ? 'var(--profit)' : 'var(--loss)' ?>;font-weight:700">
+                    (<?= ($netPLPct >= 0 ? '+' : '') . $netPLPct ?>%)
+                </span>
             </div>
         </div>
     </div>
@@ -414,8 +489,8 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
     <!-- Range bar -->
     <div style="padding:16px 20px;border-top:1px solid var(--border-light)">
         <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">
-            Capital Range — $<?= number_format($rangeMin, 2) ?> to $<?= number_format($rangeMax, 2) ?>
-            <span style="color:var(--text-muted);font-weight:400">(span: $<?= number_format($rangeSpan, 2) ?>)</span>
+            Capital Range — <?= formatUSD($rangeMin) ?> to <?= formatUSD($rangeMax) ?>
+            <span style="color:var(--text-muted);font-weight:400">(span: <?= formatUSD($rangeSpan) ?>)</span>
         </div>
         <div style="position:relative;height:8px;background:var(--bg-elevated);border-radius:99px;margin:10px 8px 22px">
             <!-- trough-to-peak filled band -->
@@ -429,23 +504,23 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
             <div style="position:absolute;left:<?= $troughPct ?>%;top:50%;transform:translate(-50%,-50%);
                         width:14px;height:14px;border-radius:50%;
                         background:var(--loss);border:2px solid var(--bg-surface)"
-                 title="Trough $<?= number_format($troughCapital,2) ?>"></div>
+                 title="Trough <?= formatUSD($troughCapital) ?>"></div>
             <!-- open dot (blue) -->
             <div style="position:absolute;left:<?= $openPct ?>%;top:50%;transform:translate(-50%,-50%);
                         width:14px;height:14px;border-radius:50%;
                         background:var(--accent);border:2px solid var(--bg-surface)"
-                 title="Open $<?= number_format($balAtStart,2) ?>"></div>
+                 title="Open <?= formatUSD($balAtStart) ?>"></div>
             <!-- close dot (dashed border) -->
             <div style="position:absolute;left:<?= $closePct ?>%;top:50%;transform:translate(-50%,-50%);
                         width:14px;height:14px;border-radius:50%;
                         background:<?= $closeColor ?>;border:3px dashed var(--bg-surface);
                         outline:2px solid <?= $closeColor ?>"
-                 title="Close $<?= number_format($closeCapital,2) ?>"></div>
+                 title="Close <?= formatUSD($closeCapital) ?>"></div>
             <!-- peak dot -->
             <div style="position:absolute;left:<?= $peakPct ?>%;top:50%;transform:translate(-50%,-50%);
                         width:16px;height:16px;border-radius:50%;
                         background:var(--profit);border:2px solid var(--bg-surface)"
-                 title="Peak $<?= number_format($peakCapital,2) ?>"></div>
+                 title="Peak <?= formatUSD($peakCapital) ?>"></div>
             <!-- labels under dots -->
             <div style="position:absolute;left:<?= $openPct ?>%;top:16px;transform:translateX(-50%);
                         font-size:9px;color:var(--accent);white-space:nowrap;font-weight:600">Open</div>
@@ -535,19 +610,19 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
         <div class="charge-item">
             <div class="charge-lbl">Gross P&amp;L</div>
             <div class="charge-val <?= $grossPL >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($grossPL >= 0 ? '+' : '') ?>$<?= number_format($grossPL,2) ?>
+                <?= formatPL($grossPL) ?>
             </div>
         </div>
         <div class="charge-item">
             <div class="charge-lbl">Brokerage + Swap</div>
             <div class="charge-val neg">
-                -$<?= number_format($totalBrok - $totalSwap, 2) ?>
+                -<?= formatUSD($totalBrok - $totalSwap) ?>
             </div>
         </div>
         <div class="charge-item">
             <div class="charge-lbl">Net P&amp;L</div>
             <div class="charge-val <?= $netPL >= 0 ? 'pos' : 'neg' ?>" style="font-size:22px">
-                <?= ($netPL >= 0 ? '+' : '') ?>$<?= number_format($netPL,2) ?>
+                <?= formatPL($netPL) ?>
             </div>
         </div>
     </div>
@@ -574,9 +649,9 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
                 <td><span class="symbol-badge"><?= htmlspecialchars($sym) ?></span></td>
                 <td><?= $s['c'] ?></td>
                 <td class="<?= $sWR >= 50 ? 'pos' : 'wrn' ?>"><?= $sWR ?>%</td>
-                <td class="<?= $s['pl'] >= 0 ? 'pl-positive' : 'pl-negative' ?>"><?= ($s['pl']>=0?'+':'').'$'.number_format($s['pl'],2) ?></td>
-                <td class="neg">-$<?= number_format($s['brok'],2) ?></td>
-                <td class="<?= $sNet >= 0 ? 'pl-positive' : 'pl-negative' ?>"><?= ($sNet>=0?'+':'').'$'.number_format($sNet,2) ?></td>
+                <td class="<?= $s['pl'] >= 0 ? 'pl-positive' : 'pl-negative' ?>"><?= formatPL($s['pl']) ?></td>
+                <td class="neg">-<?= formatUSD($s['brok']) ?></td>
+                <td class="<?= $sNet >= 0 ? 'pl-positive' : 'pl-negative' ?>"><?= formatPL($sNet) ?></td>
             </tr>
             <?php endforeach; ?>
             </tbody>
@@ -645,16 +720,16 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
                     <?php else: ?><span style="color:var(--text-muted)">—</span><?php endif; ?>
                 </td>
                 <td class="<?= $t['profit_loss'] >= 0 ? 'pl-positive' : 'pl-negative' ?>">
-                    <?= ($t['profit_loss']>=0?'+':'').'$'.number_format($t['profit_loss'],2) ?>
+                    <?= formatPL($t['profit_loss']) ?>
                 </td>
                 <td class="neg" style="font-size:11px">
-                    <?= $t['brokerage'] > 0 ? '-$'.number_format($t['brokerage'],2) : '<span style="color:var(--text-muted)">—</span>' ?>
+                    <?= $t['brokerage'] > 0 ? formatUSD($t['brokerage']) : '<span style="color:var(--text-muted)">—</span>' ?>
                 </td>
                 <td class="<?= $t['swap'] >= 0 ? 'pl-positive' : 'pl-negative' ?>" style="font-size:11px">
-                    <?= $t['swap'] != 0 ? ($t['swap']>=0?'+':'').'$'.number_format($t['swap'],2) : '<span style="color:var(--text-muted)">—</span>' ?>
+                    <?= $t['swap'] != 0 ? formatPL($t['swap']) : '<span style="color:var(--text-muted)">—</span>' ?>
                 </td>
                 <td class="<?= $net >= 0 ? 'pl-positive' : 'pl-negative' ?>" style="font-weight:700">
-                    <?= ($net>=0?'+':'').'$'.number_format($net,2) ?>
+                    <?= formatPL($net) ?>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -663,9 +738,123 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
     </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- Trade Sequence: T1 → Tn -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:20px 22px;margin-bottom:20px">
+    <!-- header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:30px;height:30px;border-radius:9px;background:rgba(37,99,235,.12);display:flex;align-items:center;justify-content:center">
+                <i class="fas fa-list-ol" style="color:var(--accent);font-size:12px"></i>
+            </div>
+            <div>
+                <div style="font-size:13px;font-weight:800">Trade Sequence — Position Tracker</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:1px"><?= $total ?> trades · cumulative net P&L after each trade</div>
+            </div>
+        </div>
+        <!-- summary pills -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <?php if ($seqPeakPos): ?>
+            <span style="background:rgba(34,197,94,.12);color:#16a34a;font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px">
+                <i class="fas fa-flag-checkered" style="margin-right:4px"></i>Peak at T<?= $seqPeakPos ?> (<?= formatPL($seqPeakVal) ?>)
+            </span>
+            <?php endif; ?>
+            <?php if ($seqNegPos): ?>
+            <span style="background:rgba(239,68,68,.1);color:#dc2626;font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px">
+                <i class="fas fa-triangle-exclamation" style="margin-right:4px"></i>Negative from T<?= $seqNegPos ?>
+            </span>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- horizontal scrollable trade strip -->
+    <div style="overflow-x:auto;padding-bottom:4px">
+        <div style="display:flex;gap:8px;min-width:max-content">
+        <?php foreach ($seqRows as $tr):
+            $isCum   = $tr['cum'] >= 0;
+            $isNet   = $tr['net'] >= 0;
+            $isPeak  = $tr['pos'] === $seqPeakPos;
+            $isFirst = $tr['pos'] === 1;
+            $cumClr  = $isCum  ? '#22c55e' : '#ef4444';
+            $cumBg   = $isCum  ? 'rgba(34,197,94,.10)' : 'rgba(239,68,68,.10)';
+            $cumBdr  = $isCum  ? 'rgba(34,197,94,.35)' : 'rgba(239,68,68,.35)';
+            $netClr  = $isNet  ? '#22c55e' : '#ef4444';
+            $arrow   = $isNet  ? '▲' : '▼';
+            $peakRing= $isPeak ? 'box-shadow:0 0 0 2px #f59e0b;' : '';
+            $reasonIcon = match($tr['reason']) {
+                'sl'   => '<i class="fas fa-shield-halved" style="color:#ef4444;font-size:9px" title="Stop Loss"></i>',
+                'tp'   => '<i class="fas fa-bullseye" style="color:#22c55e;font-size:9px" title="Take Profit"></i>',
+                'user' => '<i class="fas fa-hand" style="color:#94a3b8;font-size:9px" title="Manual"></i>',
+                default=> '',
+            };
+        ?>
+        <div style="width:110px;flex-shrink:0;background:<?= $cumBg ?>;border:1.5px solid <?= $cumBdr ?>;
+                    border-radius:12px;padding:10px 10px 8px;<?= $peakRing ?>position:relative">
+
+            <!-- position + peak badge -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <span style="font-size:9px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">T<?= $tr['pos'] ?></span>
+                <?php if ($isPeak): ?>
+                <span style="font-size:8px;font-weight:800;background:#f59e0b;color:#fff;padding:1px 5px;border-radius:4px">PEAK</span>
+                <?php elseif ($tr['pos'] === $seqNegPos): ?>
+                <span style="font-size:8px;font-weight:800;background:#ef4444;color:#fff;padding:1px 5px;border-radius:4px">NEG</span>
+                <?php endif; ?>
+            </div>
+
+            <!-- symbol + time -->
+            <div style="font-size:10px;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                <?= $tr['symbol'] ?>
+            </div>
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px">
+                <?= $tr['time'] ?> <?= $reasonIcon ?>
+            </div>
+
+            <!-- individual trade P&L -->
+            <div style="font-size:10px;color:<?= $netClr ?>;font-weight:700;margin-bottom:4px">
+                <?= $arrow ?> <?= formatPL($tr['net']) ?>
+            </div>
+
+            <!-- cumulative separator -->
+            <div style="height:1px;background:<?= $cumBdr ?>;margin-bottom:6px"></div>
+
+            <!-- cumulative total -->
+            <div style="font-size:12px;font-weight:800;font-family:'DM Mono',monospace;color:<?= $cumClr ?>">
+                <?= formatPL($tr['cum']) ?>
+            </div>
+            <div style="font-size:8px;color:var(--text-muted);margin-top:1px">cumulative</div>
+        </div>
+        <?php endforeach; ?>
+        </div>
+    </div>
+
+    <!-- insight bar -->
+    <?php
+    $lastCum = end($seqRows)['cum'] ?? 0;
+    if ($seqNegPos !== null && $seqPeakPos < $seqNegPos):
+    ?>
+    <div style="margin-top:14px;padding:10px 14px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:10px;font-size:11px;color:var(--text-secondary)">
+        <i class="fas fa-triangle-exclamation" style="color:#ef4444;margin-right:6px"></i>
+        You peaked at <strong>T<?= $seqPeakPos ?> (<?= formatPL($seqPeakVal) ?>)</strong> then went negative from <strong>T<?= $seqNegPos ?></strong>.
+        Closing after T<?= $seqPeakPos ?> would have saved <strong><?= formatUSD($seqPeakVal - $lastCum) ?></strong>.
+    </div>
+    <?php elseif ($seqPeakPos === $total && $lastCum > 0): ?>
+    <div style="margin-top:14px;padding:10px 14px;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:10px;font-size:11px;color:var(--text-secondary)">
+        <i class="fas fa-check-circle" style="color:#22c55e;margin-right:6px"></i>
+        Strong discipline — P&L improved with every trade. Final: <strong><?= formatPL($lastCum) ?></strong>.
+    </div>
+    <?php elseif ($seqNegPos === 1): ?>
+    <div style="margin-top:14px;padding:10px 14px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;font-size:11px;color:var(--text-secondary)">
+        <i class="fas fa-circle-info" style="color:#f59e0b;margin-right:6px"></i>
+        Day started negative from trade 1. No recovery — consider reviewing entry criteria.
+    </div>
+    <?php endif; ?>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function(){
+    const CS     = <?= json_encode(getActiveCurrency()['symbol']) ?>;
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const gridC  = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
     const textC  = isDark ? '#94a3b8' : '#64748b';
@@ -696,11 +885,11 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
             maintainAspectRatio: false,
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: ctx => ' Cumulative Net: $' + ctx.parsed.y.toFixed(2) } }
+                tooltip: { callbacks: { label: ctx => ' Cumulative Net: ' + CS + ctx.parsed.y.toFixed(2) } }
             },
             scales: {
                 x: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},maxTicksLimit:10,maxRotation:30} },
-                y: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},callback:v=>'$'+v} }
+                y: { grid:{color:gridC}, ticks:{color:textC,font:{size:10},callback:v=>CS+v} }
             }
         }
     });
@@ -759,7 +948,7 @@ $closeColor = $closeCapital >= $balAtStart ? 'var(--profit)' : 'var(--loss)';
                     },
                     y: {
                         grid: { color: gridC },
-                        ticks: { color: textC, font:{size:10}, callback: v => '$' + v }
+                        ticks: { color: textC, font:{size:10}, callback: v => CS + v }
                     }
                 }
             }

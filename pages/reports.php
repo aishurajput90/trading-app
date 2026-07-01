@@ -41,6 +41,7 @@ switch ($period) {
 // ---- Period stats ----
 $stmt = $db->prepare("
     SELECT COUNT(*) as total,
+           SUM(profit_loss) as total_pl,
            SUM(profit_loss - brokerage + swap) as net_pl,
            SUM(CASE WHEN (profit_loss - brokerage + swap) > 0 THEN 1 ELSE 0 END) as wins,
            SUM(CASE WHEN (profit_loss - brokerage + swap) < 0 THEN 1 ELSE 0 END) as losses,
@@ -52,11 +53,13 @@ $stmt = $db->prepare("
 $stmt->execute([$userId, $from, $to]);
 $stats = $stmt->fetch();
 
-$total   = (int)$stats['total'];
-$netPL   = floatval($stats['net_pl']);
-$wins    = (int)$stats['wins'];
-$losses  = (int)$stats['losses'];
-$winRate = $total > 0 ? round($wins / $total * 100, 1) : 0;
+$total     = (int)$stats['total'];
+$totalPL   = floatval($stats['total_pl']);
+$netPL     = floatval($stats['net_pl']);
+$brokerage = getTotalBrokerage($userId, $from, $to);
+$wins      = (int)$stats['wins'];
+$losses    = (int)$stats['losses'];
+$winRate   = $total > 0 ? round($wins / $total * 100, 1) : 0;
 
 // Drawdown: peak balance - minimum running balance in period
 $balance = getCurrentBalance($userId);
@@ -111,6 +114,58 @@ include '../includes/header.php';
 <?php else: ?>
 <div class="mb-1"></div>
 <?php endif; ?>
+
+<!-- Stats Row -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-2">
+        <div class="stat-card <?= $totalPL >= 0 ? 'profit' : 'loss' ?>">
+            <div class="stat-icon <?= $totalPL >= 0 ? 'profit' : 'loss' ?>"><i class="fas fa-chart-line"></i></div>
+            <div class="stat-value <?= $totalPL >= 0 ? 'positive' : 'negative' ?>"><?= formatPL($totalPL) ?></div>
+            <div class="stat-label">Total P&amp;L</div>
+            <div class="stat-sub">Gross before charges</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="stat-card loss">
+            <div class="stat-icon loss"><i class="fas fa-hand-holding-dollar"></i></div>
+            <div class="stat-value negative">-<?= formatUSD($brokerage) ?></div>
+            <div class="stat-label">Brokerage</div>
+            <div class="stat-sub">Charges &amp; fees</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="stat-card <?= $netPL >= 0 ? 'profit' : 'loss' ?>">
+            <div class="stat-icon <?= $netPL >= 0 ? 'profit' : 'loss' ?>"><i class="fas fa-sack-dollar"></i></div>
+            <div class="stat-value <?= $netPL >= 0 ? 'positive' : 'negative' ?>"><?= formatPL($netPL) ?></div>
+            <div class="stat-label">Net P&amp;L</div>
+            <div class="stat-sub">After all charges</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="stat-card blue">
+            <div class="stat-icon blue"><i class="fas fa-bullseye"></i></div>
+            <div class="stat-value"><?= $winRate ?>%</div>
+            <div class="stat-label">Win Rate</div>
+            <div class="stat-sub"><?= $wins ?>W / <?= $losses ?>L</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="stat-card <?= floatval($stats['best_trade']) >= 0 ? 'profit' : 'loss' ?>">
+            <div class="stat-icon <?= floatval($stats['best_trade']) >= 0 ? 'profit' : 'loss' ?>"><i class="fas fa-trophy"></i></div>
+            <div class="stat-value <?= floatval($stats['best_trade']) >= 0 ? 'positive' : 'negative' ?>"><?= $total > 0 ? formatPL(floatval($stats['best_trade'])) : formatUSD(0) ?></div>
+            <div class="stat-label">Best Trade</div>
+            <div class="stat-sub"><?= $total ?> trade<?= $total !== 1 ? 's' : '' ?> total</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="stat-card <?= floatval($stats['worst_trade']) >= 0 ? 'profit' : 'loss' ?>">
+            <div class="stat-icon <?= floatval($stats['worst_trade']) >= 0 ? 'profit' : 'loss' ?>"><i class="fas fa-arrow-trend-down"></i></div>
+            <div class="stat-value <?= floatval($stats['worst_trade']) >= 0 ? 'positive' : 'negative' ?>"><?= $total > 0 ? formatPL(floatval($stats['worst_trade'])) : formatUSD(0) ?></div>
+            <div class="stat-label">Worst Trade</div>
+            <div class="stat-sub">Avg: <?= $total > 0 ? formatPL(floatval($stats['avg_pl'])) : formatUSD(0) ?></div>
+        </div>
+    </div>
+</div>
 
 <!-- Charts Row -->
 <div class="row g-3 mb-4">
@@ -342,6 +397,7 @@ include '../includes/header.php';
 
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
+var CS = <?= json_encode(getActiveCurrency()['symbol']) ?>;
 document.addEventListener('DOMContentLoaded', function() {
 
     // ── Inline panel charts ──────────────────────────────────────────────────
@@ -419,13 +475,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         borderColor: cl.grid, borderWidth:1,
                         titleColor: cl.text, bodyColor: cl.text,
                         padding:10, displayColors:false,
-                        callbacks: { label: function(c){ var v=c.raw; return (v>=0?'+$':'-$')+Math.abs(v).toFixed(2); } }
+                        callbacks: { label: function(c){ var v=c.raw; return (v>=0?'+':'-')+CS+Math.abs(v).toFixed(2); } }
                     }
                 },
                 scales: {
                     x: { grid:{color:cl.grid}, ticks:{color:cl.text,font:{size:11},maxRotation:45} },
                     y: { grid:{color:cl.grid}, ticks:{color:cl.text,font:{size:11},
-                         callback:function(v){return (v>=0?'+$':'-$')+Math.abs(v);}} }
+                         callback:function(v){return (v>=0?'+':'-')+CS+Math.abs(v);}} }
                 }
             }
         });
@@ -488,7 +544,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return { n: n, dates: _dates.slice(-n), eq: _equity.slice(-n), pls: _pls.slice(-n) };
     }
 
-    function fmtMoney(v) { return '$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function fmtMoney(v) { return CS+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
     function fmtDate(s) {
         var p=s.split('-'), m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         return m[+p[1]-1]+' '+parseInt(p[2])+', '+p[0];
@@ -616,10 +672,10 @@ document.addEventListener('DOMContentLoaded', function() {
             eqEl.textContent=fmtMoney(eq); eqEl.style.color=eq>=_startEq?'#22c55e':'#f87171';
             var cpEl=document.getElementById('ttCumPL');
             cpEl.textContent=(cp>=0?'+':'')+fmtMoney(cp)*(cp<0?-1:1);
-            cpEl.textContent=(cp>=0?'+$':'-$')+Math.abs(cp).toFixed(2);
+            cpEl.textContent=(cp>=0?'+':'-')+CS+Math.abs(cp).toFixed(2);
             cpEl.style.color=cp>=0?'#22c55e':'#f87171';
             var dpEl=document.getElementById('ttDailyPL');
-            dpEl.textContent=(dp>=0?'+$':'-$')+Math.abs(dp).toFixed(2);
+            dpEl.textContent=(dp>=0?'+':'-')+CS+Math.abs(dp).toFixed(2);
             dpEl.style.color=dp>=0?'#22c55e':'#f87171';
             document.getElementById('ttDrawdown').textContent=dd.toFixed(2)+'%';
             var gEl=document.getElementById('ttGain');

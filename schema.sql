@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(150) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     initial_balance DECIMAL(15,2) DEFAULT 10000.00,
+    currency       VARCHAR(10)  NOT NULL DEFAULT 'USD',
     role           ENUM('user','admin') NOT NULL DEFAULT 'user',
     last_login_at  DATETIME  DEFAULT NULL,
     last_active_at DATETIME  DEFAULT NULL,
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS trades (
     sl_amount  DECIMAL(10,2) DEFAULT NULL COMMENT 'Stop loss risk in USD',
     tp_amount  DECIMAL(10,2) DEFAULT NULL COMMENT 'Take profit target in USD',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_trade_identity (user_id, open_time, symbol, quantity),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -130,6 +132,8 @@ CREATE TABLE IF NOT EXISTS risk_snapshots (
 -- ALTER TABLE trades ADD COLUMN close_reason VARCHAR(20)   DEFAULT NULL AFTER trade_type;
 -- ALTER TABLE trades ADD COLUMN ticket       VARCHAR(50)   DEFAULT NULL AFTER close_reason;
 -- ALTER TABLE trades ADD COLUMN import_source VARCHAR(50)  DEFAULT NULL AFTER ticket;
+-- Enable CSV duplicate detection (run once on existing DBs):
+-- ALTER TABLE trades ADD UNIQUE KEY uq_trade_identity (user_id, open_time, symbol, quantity);
 
 -- ============================================================
 -- India Market Panel — Tables
@@ -570,4 +574,28 @@ CREATE TABLE IF NOT EXISTS password_resets (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_pr_email (email),
     INDEX idx_pr_token (token)
+);
+
+-- ── v3 Migration ─────────────────────────────────────────────────────────────
+-- Run on existing databases:
+-- ALTER TABLE users ADD COLUMN currency VARCHAR(10) NOT NULL DEFAULT 'USD' AFTER initial_balance;
+
+-- ── Broker Column Mapper ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS broker_profiles (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    user_id    INT NOT NULL,
+    name       VARCHAR(100) NOT NULL,
+    notes      TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_bp_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS broker_column_maps (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    profile_id      INT NOT NULL,
+    internal_field  VARCHAR(50)  NOT NULL,
+    csv_column_name VARCHAR(100) NOT NULL DEFAULT '',
+    UNIQUE KEY uq_profile_field (profile_id, internal_field),
+    FOREIGN KEY (profile_id) REFERENCES broker_profiles(id) ON DELETE CASCADE
 );

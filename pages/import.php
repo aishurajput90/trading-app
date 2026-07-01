@@ -27,6 +27,40 @@ define('CSV_COL_SWAP',        12);
 define('CSV_COL_PROFIT',      13);
 define('CSV_COL_CLOSE_REASON',16);
 
+function resolveProfileColumns(array $headers, array $profileMap, array $requiredFields): array {
+    $headerIndex = [];
+    foreach ($headers as $i => $h) $headerIndex[strtolower(trim($h))] = $i;
+    $colIndex = $missing = [];
+    foreach ($profileMap as $field => $csvCol) {
+        if ($csvCol === '') continue;
+        $csvLower = strtolower(trim($csvCol));
+        if (isset($headerIndex[$csvLower])) $colIndex[$field] = $headerIndex[$csvLower];
+        elseif (in_array($field, $requiredFields)) $missing[] = $field;
+    }
+    foreach ($requiredFields as $rf)
+        if (!isset($colIndex[$rf]) && !in_array($rf, $missing)) $missing[] = $rf;
+    return ['col_index' => $colIndex, 'missing_required' => $missing];
+}
+
+$selectedProfileId = (int)($_POST['broker_profile_id'] ?? 0);
+
+$bpStmt = $db->prepare("SELECT id, name FROM broker_profiles WHERE user_id = ? ORDER BY name");
+$bpStmt->execute([$userId]);
+$brokerProfiles = $bpStmt->fetchAll();
+
+$profileMap = [];
+if ($selectedProfileId > 0) {
+    $mapStmt = $db->prepare(
+        "SELECT bcm.internal_field, bcm.csv_column_name
+         FROM broker_column_maps bcm
+         JOIN broker_profiles bp ON bp.id = bcm.profile_id
+         WHERE bcm.profile_id = ? AND bp.user_id = ? AND bcm.csv_column_name != ''"
+    );
+    $mapStmt->execute([$selectedProfileId, $userId]);
+    foreach ($mapStmt->fetchAll() as $r)
+        $profileMap[$r['internal_field']] = strtolower(trim($r['csv_column_name']));
+}
+
 // ── Handle preview (AJAX or form) ─────────────────────────────────────────
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
@@ -44,71 +78,113 @@ if ($action === 'import' && isset($_FILES['csvfile'])) {
     if (!$file || !is_readable($file)) {
         $msg = 'Could not read uploaded file.'; $msgType = 'error';
     } else {
-        $handle    = fopen($file, 'r');
-        $header    = fgetcsv($handle); // skip header
-        $inserted  = 0;
-        $skipped   = 0;
-        $errors    = [];
+        $handle   = fopen($file, 'r');
+        $inserted = 0;
+        $skipped  = 0;
+        $errors   = [];
 
         $stmt = $db->prepare("INSERT IGNORE INTO trades
             (user_id, trade_datetime, open_time, symbol, trade_type, entry_price, exit_price, quantity,
              profit_loss, brokerage, swap, close_reason, ticket, import_source, notes)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'csv_import','')");
 
-        while (($row = fgetcsv($handle)) !== false) {
-            if (count($row) < 14) { $skipped++; continue; }
-
-            $ticket      = trim($row[CSV_COL_TICKET] ?? '');
-            $rawOpen     = str_replace('T', ' ', trim($row[CSV_COL_OPEN_TIME]  ?? ''));
-            $rawClose    = str_replace('T', ' ', trim($row[CSV_COL_CLOSE_TIME] ?? ''));
-            $type        = strtolower(trim($row[CSV_COL_TYPE] ?? 'buy'));
-            $lots        = floatval($row[CSV_COL_LOTS]       ?? 0);
-            $symbol      = strtoupper(trim($row[CSV_COL_SYMBOL] ?? ''));
-            $entry       = floatval($row[CSV_COL_ENTRY]      ?? 0);
-            $exit        = floatval($row[CSV_COL_EXIT]       ?? 0);
-            $commission  = floatval($row[CSV_COL_COMMISSION] ?? 0); // CSV stores as negative
-            $swap        = floatval($row[CSV_COL_SWAP]       ?? 0);
-            $profit      = floatval($row[CSV_COL_PROFIT]     ?? 0);
-            $closeReason = strtolower(trim($row[CSV_COL_CLOSE_REASON] ?? '')) ?: null;
-
-            // Brokerage: CSV stores commission as negative, we store as positive
-            $brokerage = abs($commission);
-
-            // Convert UTC → IST (Asia/Kolkata, +5:30) before storing
-            if (!$rawClose) { $skipped++; continue; }
-            $closeObj = new DateTime($rawClose, new DateTimeZone('UTC'));
-            $closeObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
-            $dt = $closeObj->format('Y-m-d H:i:s');
-
-            $openTime = '';
-            if ($rawOpen) {
-                $openObj = new DateTime($rawOpen, new DateTimeZone('UTC'));
-                $openObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
-                $openTime = $openObj->format('Y-m-d H:i:s');
+        if ($selectedProfileId === 0) {
+            // ── Legacy path — fixed column positions ─────────────────────────
+            fgetcsv($handle); // skip header row
+            while (($row = fgetcsv($handle)) !== false) {
+                if (count($row) < 14) { $skipped++; continue; }
+                $ticket      = trim($row[CSV_COL_TICKET] ?? '');
+                $rawOpen     = str_replace('T', ' ', trim($row[CSV_COL_OPEN_TIME]  ?? ''));
+                $rawClose    = str_replace('T', ' ', trim($row[CSV_COL_CLOSE_TIME] ?? ''));
+                $type        = strtolower(trim($row[CSV_COL_TYPE] ?? 'buy'));
+                $lots        = floatval($row[CSV_COL_LOTS]       ?? 0);
+                $symbol      = strtoupper(trim($row[CSV_COL_SYMBOL] ?? ''));
+                $entry       = floatval($row[CSV_COL_ENTRY]      ?? 0);
+                $exit        = floatval($row[CSV_COL_EXIT]       ?? 0);
+                $commission  = floatval($row[CSV_COL_COMMISSION] ?? 0);
+                $swap        = floatval($row[CSV_COL_SWAP]       ?? 0);
+                $profit      = floatval($row[CSV_COL_PROFIT]     ?? 0);
+                $closeReason = strtolower(trim($row[CSV_COL_CLOSE_REASON] ?? '')) ?: null;
+                $brokerage   = abs($commission);
+                if (!$rawClose) { $skipped++; continue; }
+                $closeObj = new DateTime($rawClose, new DateTimeZone('UTC'));
+                $closeObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
+                $dt = $closeObj->format('Y-m-d H:i:s');
+                $openTime = '';
+                if ($rawOpen) {
+                    $openObj = new DateTime($rawOpen, new DateTimeZone('UTC'));
+                    $openObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
+                    $openTime = $openObj->format('Y-m-d H:i:s');
+                }
+                if (!in_array($type, ['buy','sell','buy_limit','sell_limit'])) $type = 'buy';
+                try {
+                    $stmt->execute([$userId, $dt, $openTime ?: null, $symbol, $type, $entry, $exit, $lots, $profit, $brokerage, $swap, $closeReason, $ticket]);
+                    if ($stmt->rowCount() > 0) $inserted++; else $skipped++;
+                } catch (Exception $e) {
+                    $errors[] = "Row $ticket: " . $e->getMessage(); $skipped++;
+                }
             }
-
-            // Validate type
-            if (!in_array($type, ['buy','sell','buy_limit','sell_limit'])) $type = 'buy';
-
-            try {
-                $stmt->execute([$userId, $dt, $openTime ?: null, $symbol, $type, $entry, $exit, $lots, $profit, $brokerage, $swap, $closeReason, $ticket]);
-                if ($stmt->rowCount() > 0) $inserted++;
-                else $skipped++; // duplicate ticket
-            } catch (Exception $e) {
-                $errors[] = "Row $ticket: " . $e->getMessage();
-                $skipped++;
+        } else {
+            // ── Profile path — header-name mapping ───────────────────────────
+            $headers  = fgetcsv($handle) ?: [];
+            $required = ['trade_datetime','trade_type','symbol','quantity','entry_price','exit_price','profit_loss'];
+            $resolved = resolveProfileColumns($headers, $profileMap, $required);
+            if (!empty($resolved['missing_required'])) {
+                $msg     = 'Import aborted: required columns not found — ' . implode(', ', $resolved['missing_required']) . '. Check your broker profile mapping and ensure the CSV column headers match exactly.';
+                $msgType = 'error';
+            } else {
+                $colIndex = $resolved['col_index'];
+                while (($row = fgetcsv($handle)) !== false) {
+                    if (count($row) < 2) { $skipped++; continue; }
+                    $get = function(string $field, $default = '') use ($colIndex, $row) {
+                        $idx = $colIndex[$field] ?? null;
+                        return ($idx !== null && isset($row[$idx])) ? trim($row[$idx]) : $default;
+                    };
+                    $ticket      = $get('ticket');
+                    $rawOpen     = str_replace('T', ' ', $get('open_time'));
+                    $rawClose    = str_replace('T', ' ', $get('trade_datetime'));
+                    $type        = strtolower($get('trade_type', 'buy'));
+                    $lots        = floatval($get('quantity', 0));
+                    $symbol      = strtoupper($get('symbol'));
+                    $entry       = floatval($get('entry_price', 0));
+                    $exit        = floatval($get('exit_price', 0));
+                    $commission  = floatval($get('brokerage', 0));
+                    $swap        = floatval($get('swap', 0));
+                    $profit      = floatval($get('profit_loss', 0));
+                    $closeReason = strtolower($get('close_reason')) ?: null;
+                    $brokerage   = abs($commission);
+                    if (!$rawClose) { $skipped++; continue; }
+                    $closeObj = new DateTime($rawClose, new DateTimeZone('UTC'));
+                    $closeObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
+                    $dt = $closeObj->format('Y-m-d H:i:s');
+                    $openTime = '';
+                    if ($rawOpen) {
+                        $openObj = new DateTime($rawOpen, new DateTimeZone('UTC'));
+                        $openObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
+                        $openTime = $openObj->format('Y-m-d H:i:s');
+                    }
+                    if (!in_array($type, ['buy','sell','buy_limit','sell_limit'])) $type = 'buy';
+                    try {
+                        $stmt->execute([$userId, $dt, $openTime ?: null, $symbol, $type, $entry, $exit, $lots, $profit, $brokerage, $swap, $closeReason, $ticket]);
+                        if ($stmt->rowCount() > 0) $inserted++; else $skipped++;
+                    } catch (Exception $e) {
+                        $errors[] = "Row $ticket: " . $e->getMessage(); $skipped++;
+                    }
+                }
             }
         }
         fclose($handle);
 
-        if ($inserted > 0) {
-            $msg = "✓ Import complete: $inserted trades imported" . ($skipped > 0 ? ", $skipped skipped (duplicates/errors)." : ".");
-            $msgType = 'success';
-        } else {
-            $msg = "No new trades imported. $skipped rows skipped (already exist or invalid).";
-            $msgType = 'error';
+        if (!$msg) {
+            if ($inserted > 0) {
+                $msg = "✓ Import complete: $inserted trades imported" . ($skipped > 0 ? ", $skipped skipped (duplicates/errors)." : ".");
+                $msgType = 'success';
+            } else {
+                $msg = "No new trades imported. $skipped rows skipped (already exist or invalid).";
+                $msgType = 'error';
+            }
+            if ($errors) $msg .= ' Errors: ' . implode(' | ', array_slice($errors,0,3));
         }
-        if ($errors) $msg .= ' Errors: ' . implode(' | ', array_slice($errors,0,3));
     }
 }
 
@@ -117,29 +193,71 @@ if ($action === 'preview' && isset($_FILES['csvfile'])) {
     $file = $_FILES['csvfile']['tmp_name'];
     if ($file && is_readable($file)) {
         $handle = fopen($file, 'r');
-        fgetcsv($handle); // skip header
-        while (($row = fgetcsv($handle)) !== false && count($preview) < 20) {
-            if (count($row) < 14) continue;
-            $rawCT = str_replace('T', ' ', trim($row[CSV_COL_CLOSE_TIME] ?? ''));
-            $ctIST = '';
-            if ($rawCT) {
-                $ctObj = new DateTime($rawCT, new DateTimeZone('UTC'));
-                $ctObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
-                $ctIST = $ctObj->format('Y-m-d H:i:s');
+        if ($selectedProfileId === 0) {
+            // ── Legacy path ───────────────────────────────────────────────────
+            fgetcsv($handle); // skip header
+            while (($row = fgetcsv($handle)) !== false && count($preview) < 20) {
+                if (count($row) < 14) continue;
+                $rawCT = str_replace('T', ' ', trim($row[CSV_COL_CLOSE_TIME] ?? ''));
+                $ctIST = '';
+                if ($rawCT) {
+                    $ctObj = new DateTime($rawCT, new DateTimeZone('UTC'));
+                    $ctObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
+                    $ctIST = $ctObj->format('Y-m-d H:i:s');
+                }
+                $preview[] = [
+                    'ticket'       => $row[CSV_COL_TICKET]       ?? '',
+                    'close_time'   => $ctIST ?: $rawCT,
+                    'type'         => $row[CSV_COL_TYPE]          ?? '',
+                    'symbol'       => $row[CSV_COL_SYMBOL]        ?? '',
+                    'lots'         => $row[CSV_COL_LOTS]          ?? '',
+                    'entry'        => $row[CSV_COL_ENTRY]         ?? '',
+                    'exit'         => $row[CSV_COL_EXIT]          ?? '',
+                    'commission'   => $row[CSV_COL_COMMISSION]    ?? 0,
+                    'swap'         => $row[CSV_COL_SWAP]          ?? 0,
+                    'profit'       => $row[CSV_COL_PROFIT]        ?? 0,
+                    'close_reason' => $row[CSV_COL_CLOSE_REASON]  ?? '',
+                ];
             }
-            $preview[] = [
-                'ticket'       => $row[CSV_COL_TICKET]       ?? '',
-                'close_time'   => $ctIST ?: $rawCT,
-                'type'         => $row[CSV_COL_TYPE]          ?? '',
-                'symbol'       => $row[CSV_COL_SYMBOL]        ?? '',
-                'lots'         => $row[CSV_COL_LOTS]          ?? '',
-                'entry'        => $row[CSV_COL_ENTRY]         ?? '',
-                'exit'         => $row[CSV_COL_EXIT]          ?? '',
-                'commission'   => $row[CSV_COL_COMMISSION]    ?? 0,
-                'swap'         => $row[CSV_COL_SWAP]          ?? 0,
-                'profit'       => $row[CSV_COL_PROFIT]        ?? 0,
-                'close_reason' => $row[CSV_COL_CLOSE_REASON]  ?? '',
-            ];
+        } else {
+            // ── Profile path ─────────────────────────────────────────────────
+            $headers  = fgetcsv($handle) ?: [];
+            $required = ['trade_datetime','symbol','profit_loss'];
+            $resolved = resolveProfileColumns($headers, $profileMap, $required);
+            if (!empty($resolved['missing_required'])) {
+                $missing = implode(', ', $resolved['missing_required']);
+                $msg     = "Cannot preview: required columns not found — $missing. Check your broker profile mapping.";
+                $msgType = 'error';
+            } else {
+                $colIndex = $resolved['col_index'];
+                while (($row = fgetcsv($handle)) !== false && count($preview) < 20) {
+                    if (count($row) < 2) continue;
+                    $get = function(string $field, $default = '') use ($colIndex, $row) {
+                        $idx = $colIndex[$field] ?? null;
+                        return ($idx !== null && isset($row[$idx])) ? trim($row[$idx]) : $default;
+                    };
+                    $rawCT = str_replace('T', ' ', $get('trade_datetime'));
+                    $ctIST = '';
+                    if ($rawCT) {
+                        $ctObj = new DateTime($rawCT, new DateTimeZone('UTC'));
+                        $ctObj->setTimezone(new DateTimeZone('Asia/Kolkata'));
+                        $ctIST = $ctObj->format('Y-m-d H:i:s');
+                    }
+                    $preview[] = [
+                        'ticket'       => $get('ticket'),
+                        'close_time'   => $ctIST ?: $rawCT,
+                        'type'         => $get('trade_type'),
+                        'symbol'       => $get('symbol'),
+                        'lots'         => $get('quantity'),
+                        'entry'        => $get('entry_price'),
+                        'exit'         => $get('exit_price'),
+                        'commission'   => $get('brokerage', 0),
+                        'swap'         => $get('swap', 0),
+                        'profit'       => $get('profit_loss', 0),
+                        'close_reason' => $get('close_reason'),
+                    ];
+                }
+            }
         }
         fclose($handle);
     }
@@ -186,8 +304,26 @@ include '../includes/header.php';
                 <div class="panel-title"><i class="fas fa-file-csv"></i> Import Broker CSV</div>
             </div>
             <div class="panel-body">
+                <!-- Broker profile selector -->
+                <div class="mb-3">
+                    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:5px">
+                        <i class="fas fa-sliders"></i> Broker Profile
+                    </label>
+                    <select id="profileSelect" class="form-select form-select-sm">
+                        <option value="0" <?= $selectedProfileId === 0 ? 'selected' : '' ?>>Legacy Format (fixed column positions)</option>
+                        <?php foreach ($brokerProfiles as $bp): ?>
+                        <option value="<?= $bp['id'] ?>" <?= $selectedProfileId === (int)$bp['id'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($bp['name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+                        <a href="broker_mapper.php" style="color:var(--accent)"><i class="fas fa-sliders"></i> Manage Broker Profiles</a>
+                    </div>
+                </div>
+
                 <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
-                    Upload your broker's trade history CSV. The system reads commission as <strong>brokerage charge</strong> automatically.
+                    Upload your broker's trade history CSV. Commission is stored as <strong>brokerage charge</strong> automatically.
                     Duplicate tickets are skipped — safe to re-import.
                 </p>
 
@@ -203,6 +339,7 @@ include '../includes/header.php';
                 <form method="POST" enctype="multipart/form-data" id="previewForm">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="preview">
+                    <input type="hidden" name="broker_profile_id" id="previewProfileId" value="<?= $selectedProfileId ?>">
                     <input type="file" name="csvfile" id="csvPreviewInput" accept=".csv" style="display:none">
                     <button type="submit" class="btn-secondary-custom w-100 mt-3" id="previewBtn" disabled>
                         <i class="fas fa-eye"></i> Preview (first 20 rows)
@@ -213,6 +350,7 @@ include '../includes/header.php';
                 <form method="POST" enctype="multipart/form-data" id="importForm">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="import">
+                    <input type="hidden" name="broker_profile_id" id="importProfileId" value="<?= $selectedProfileId ?>">
                     <input type="file" name="csvfile" id="csvImportInput" accept=".csv" style="display:none">
                     <button type="submit" class="btn-primary-custom w-100 mt-2" id="importBtn" disabled>
                         <i class="fas fa-file-import"></i> Import All Trades
@@ -223,11 +361,12 @@ include '../includes/header.php';
 
         <!-- CSV Format Reference -->
         <div class="panel mb-4">
+            <?php if ($selectedProfileId === 0): ?>
             <div class="panel-header">
                 <div class="panel-title"><i class="fas fa-info-circle"></i> Expected CSV Format</div>
             </div>
             <div class="panel-body">
-                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Your broker CSV must have these columns (order matters):</p>
+                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Legacy format — columns must be in this exact order:</p>
                 <div class="csv-col-map">
                     <?php
                     $cols = [
@@ -259,6 +398,36 @@ include '../includes/header.php';
                     <?php endforeach; ?>
                 </div>
             </div>
+            <?php else:
+                $selProfile = null;
+                foreach ($brokerProfiles as $bp) { if ((int)$bp['id'] === $selectedProfileId) { $selProfile = $bp; break; } }
+                $activeMap  = $db->prepare("SELECT internal_field, csv_column_name FROM broker_column_maps WHERE profile_id = ? AND csv_column_name != '' ORDER BY internal_field");
+                $activeMap->execute([$selectedProfileId]);
+                $activeMappings = $activeMap->fetchAll();
+                $fieldLabels = ['trade_datetime'=>'Close Time','open_time'=>'Open Time','trade_type'=>'Trade Type','symbol'=>'Symbol','quantity'=>'Quantity/Lots','entry_price'=>'Entry Price','exit_price'=>'Exit Price','ticket'=>'Ticket','brokerage'=>'Commission','swap'=>'Swap','profit_loss'=>'P/L','close_reason'=>'Close Reason'];
+            ?>
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-map"></i> Profile: <?= htmlspecialchars($selProfile['name'] ?? 'Selected Profile') ?></div>
+                <a href="broker_mapper.php?edit=<?= $selectedProfileId ?>" class="panel-link">Edit</a>
+            </div>
+            <div class="panel-body">
+                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                    Matching CSV headers by name (case-insensitive). <?= count($activeMappings) ?>/12 fields mapped.
+                </p>
+                <div class="csv-col-map">
+                    <div class="csv-col-row csv-col-header">
+                        <span class="csv-col-name">Internal Field</span>
+                        <span class="csv-col-maps">Your CSV Column</span>
+                    </div>
+                    <?php foreach ($activeMappings as $m): $isKey = in_array($m['internal_field'], ['trade_datetime','symbol','profit_loss']); ?>
+                    <div class="csv-col-row <?= $isKey ? 'csv-col-highlight' : '' ?>">
+                        <span class="csv-col-name"><?= htmlspecialchars($fieldLabels[$m['internal_field']] ?? $m['internal_field']) ?></span>
+                        <span class="csv-col-maps"><?= htmlspecialchars($m['csv_column_name']) ?></span>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
 
         <!-- Imported summary + delete -->
@@ -366,6 +535,17 @@ const dropzone        = document.getElementById('dropzone');
 const dropzoneName    = document.getElementById('dropzoneName');
 let   selectedFile    = null;
 
+const profileSelect    = document.getElementById('profileSelect');
+const previewProfileId = document.getElementById('previewProfileId');
+const importProfileId  = document.getElementById('importProfileId');
+
+function syncProfileId() {
+    const val = profileSelect ? profileSelect.value : '0';
+    if (previewProfileId) previewProfileId.value = val;
+    if (importProfileId)  importProfileId.value  = val;
+}
+if (profileSelect) profileSelect.addEventListener('change', syncProfileId);
+
 function onFileSelected(file) {
     if (!file || !file.name.endsWith('.csv')) { alert('Please select a .csv file'); return; }
     selectedFile = file;
@@ -373,6 +553,7 @@ function onFileSelected(file) {
     dropzoneName.style.display = 'block';
     previewBtn.disabled = false;
     importBtn.disabled  = false;
+    syncProfileId();
 
     // Inject into both form inputs via DataTransfer
     const dt = new DataTransfer();

@@ -11,13 +11,14 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="<?= $rootPath ?? '' ?>assets/css/style.css" rel="stylesheet">
+    <link href="<?= $rootPath ?? '' ?>assets/css/style.css?v=1.0.2" rel="stylesheet">
     <script>
         // Apply theme before paint to avoid flash
         (function(){
             var t = localStorage.getItem('dos_theme') || 'light';
             document.documentElement.setAttribute('data-theme', t);
         })();
+        window.APP_CS = <?= json_encode(getActiveCurrency()['symbol']) ?>;
     </script>
 </head>
 <body>
@@ -53,11 +54,20 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         <a href="<?= $rootPath ?? '' ?>pages/analysis.php" class="nav-item <?= $currentPage === 'analysis' ? 'active' : '' ?>">
             <i class="fas fa-magnifying-glass-chart"></i><span>Analyzer</span>
         </a>
+        <a href="<?= $rootPath ?? '' ?>pages/patterns.php" class="nav-item <?= $currentPage === 'patterns' ? 'active' : '' ?>">
+            <i class="fas fa-fingerprint"></i><span>Pattern Analysis</span>
+        </a>
         <a href="<?= $rootPath ?? '' ?>pages/cycles.php" class="nav-item <?= $currentPage === 'cycles' ? 'active' : '' ?>">
             <i class="fas fa-rotate"></i><span>Capital Cycles</span>
         </a>
         <a href="<?= $rootPath ?? '' ?>pages/import.php" class="nav-item <?= $currentPage === 'import' ? 'active' : '' ?>">
             <i class="fas fa-file-import"></i><span>CSV Import</span>
+        </a>
+        <a href="<?= $rootPath ?? '' ?>pages/broker_mapper.php" class="nav-item <?= $currentPage === 'broker_mapper' ? 'active' : '' ?>">
+            <i class="fas fa-sliders"></i><span>Broker Profiles</span>
+        </a>
+        <a href="<?= $rootPath ?? '' ?>pages/zerodha_import.php" class="nav-item <?= $currentPage === 'zerodha_import' ? 'active' : '' ?>">
+            <i class="fas fa-z"></i><span>Zerodha Import</span>
         </a>
         <a href="<?= $rootPath ?? '' ?>pages/brokerage.php" class="nav-item <?= $currentPage === 'brokerage' ? 'active' : '' ?>">
             <i class="fas fa-hand-holding-dollar"></i><span>Brokerage</span>
@@ -177,7 +187,10 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                     'funds'         => 'Fund Manager',
                     'reports'       => 'Analytics & Reports',
                     'import'        => 'CSV Import',
+                    'broker_mapper'   => 'Broker Profiles',
+                    'zerodha_import'  => 'Zerodha Import',
                     'analysis'      => 'Trade Analyzer',
+                    'patterns'      => 'Pattern Analysis',
                     'cycles'        => 'Capital Cycles',
                     'coach'          => 'Coach Dashboard',
                     'pre_checklist'  => 'Pre-Trade Checklist',

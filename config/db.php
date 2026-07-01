@@ -24,6 +24,18 @@ define('MAX_RISK_PER_TRADE_PCT',  2.0);   // max % account risked per single tra
 define('MAX_DAILY_LOSS_DOLLAR',   50.0);  // adjust to your daily loss hard stop in $
 define('MAX_DAILY_PROFIT_TARGET', 100.0); // optional soft daily profit target in $
 
+// ---- Currency Registry ----
+define('CURRENCY_CONFIG', [
+    'USD' => ['symbol' => '$',   'decimals' => 2, 'indian' => false],
+    'INR' => ['symbol' => '₹',  'decimals' => 2, 'indian' => true ],
+    'EUR' => ['symbol' => '€',  'decimals' => 2, 'indian' => false],
+    'GBP' => ['symbol' => '£',  'decimals' => 2, 'indian' => false],
+    'JPY' => ['symbol' => '¥',  'decimals' => 0, 'indian' => false],
+    'AUD' => ['symbol' => 'A$', 'decimals' => 2, 'indian' => false],
+    'CAD' => ['symbol' => 'C$', 'decimals' => 2, 'indian' => false],
+    'SGD' => ['symbol' => 'S$', 'decimals' => 2, 'indian' => false],
+]);
+
 function getDB() {
     static $pdo = null;
     if ($pdo === null) {
@@ -50,16 +62,50 @@ function getDB() {
     return $pdo;
 }
 
-// Format P/L as USD with sign: +$120.00 or -$50.00
-function formatPL($value) {
-    $val = floatval($value);
-    if ($val >= 0) return '+$' . number_format($val, 2);
-    return '-$' . number_format(abs($val), 2);
+// Returns the active currency config for the current user (cached per request)
+function getActiveCurrency(): array {
+    static $cfg = null;
+    if ($cfg === null) {
+        $code = $_SESSION['user_currency'] ?? 'USD';
+        $all  = CURRENCY_CONFIG;
+        $cfg  = $all[$code] ?? $all['USD'];
+        $cfg['code'] = $code;
+    }
+    return $cfg;
 }
 
-// Format as plain USD: $1,200.00
+// Internal: format a non-negative number with the right decimal/grouping for the currency
+function _formatCurrencyNumber(float $abs, array $cfg): string {
+    if ($cfg['indian']) {
+        // Indian lakh separators: 1,23,456.78
+        $int = (string)(int)floor($abs);
+        if (strlen($int) > 3) {
+            $last3 = substr($int, -3);
+            $rest  = preg_replace('/(\d)(?=(\d{2})+$)/', '$1,', substr($int, 0, -3));
+            $int   = $rest . ',' . $last3;
+        }
+        if ($cfg['decimals'] > 0) {
+            $dec = round($abs - floor($abs), $cfg['decimals']);
+            $int .= '.' . str_pad((string)(int)round($dec * (10 ** $cfg['decimals'])), $cfg['decimals'], '0', STR_PAD_LEFT);
+        }
+        return $int;
+    }
+    return number_format($abs, $cfg['decimals']);
+}
+
+// Format P/L with sign: +$120.00 or -$50.00 (uses active user currency)
+function formatPL($value) {
+    $val = floatval($value);
+    $cfg = getActiveCurrency();
+    $num = _formatCurrencyNumber(abs($val), $cfg);
+    return ($val >= 0 ? '+' : '-') . $cfg['symbol'] . $num;
+}
+
+// Format as plain currency amount: $1,200.00 (uses active user currency)
 function formatUSD($value) {
-    return '$' . number_format(floatval($value), 2);
+    $val = floatval($value);
+    $cfg = getActiveCurrency();
+    return $cfg['symbol'] . _formatCurrencyNumber(abs($val), $cfg);
 }
 
 // Helper: get current balance (USD)

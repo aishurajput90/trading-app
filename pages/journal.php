@@ -376,10 +376,10 @@ include '../includes/header.php';
                     $rrColor = $rr === null ? 'var(--text-muted)' : ($rr >= 2 ? '#22c55e' : ($rr >= 1 ? '#eab308' : '#ef4444'));
                     ?>
                     <td style="font-size:12px;font-weight:700;color:#ef4444">
-                        <?= $sl !== null ? '$'.number_format($sl,2) : '<span style="color:var(--loss);font-size:10px;font-weight:800">NO SL</span>' ?>
+                        <?= $sl !== null ? formatUSD($sl) : '<span style="color:var(--loss);font-size:10px;font-weight:800">NO SL</span>' ?>
                     </td>
                     <td style="font-size:12px;font-weight:700;color:#22c55e">
-                        <?= $tp !== null ? '$'.number_format($tp,2) : '<span style="color:var(--text-muted)">—</span>' ?>
+                        <?= $tp !== null ? formatUSD($tp) : '<span style="color:var(--text-muted)">—</span>' ?>
                     </td>
                     <td style="font-size:12px;font-weight:800;color:<?= $rrColor ?>">
                         <?= $rr !== null ? '1:'.number_format($rr,2) : '<span style="color:var(--text-muted)">—</span>' ?>

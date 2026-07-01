@@ -88,26 +88,23 @@ $showCycleBadge   = false;
 
 if ($lastSO) {
     $showCycleBadge = true;
-    // Transactions strictly AFTER the stop out (compare full datetime via created_at)
-    $soCreatedAt = $lastSO['created_at'];  // e.g. "2026-02-22 10:30:00"
+    $soDate = $lastSO['date']; // business date (YYYY-MM-DD) — same boundary used by getCurrentBalance
     foreach ($transactions as $tx) {
         if ($tx['type'] === 'stop_out') continue;
-        if ($tx['created_at'] > $soCreatedAt) {
+        if ($tx['date'] > $soDate) {
             if ($tx['type'] === 'deposit')  $cycleDeposits += (float)$tx['amount'];
             if ($tx['type'] === 'withdraw') $cycleWithdraw += (float)$tx['amount'];
             if (!$cycleStart || $tx['date'] < $cycleStart) $cycleStart = $tx['date'];
         }
     }
-    // The cycle start is the date of the first deposit after the stop out
-    // (if no deposits yet, it's still "after stop out date")
     if (!$cycleStart) $cycleStart = $lastSO['date'];
 
-    // Trades P/L after stop out datetime
+    // Net P/L (profit_loss - brokerage + swap) after stop-out date — matches getCurrentBalance formula
     $cyclePLStmt = $db->prepare("
-        SELECT COALESCE(SUM(profit_loss),0) as total
-        FROM trades WHERE user_id=? AND trade_datetime > ?
+        SELECT COALESCE(SUM(profit_loss - brokerage + swap),0) as total
+        FROM trades WHERE user_id=? AND DATE(trade_datetime) > ?
     ");
-    $cyclePLStmt->execute([$userId, $soCreatedAt]);
+    $cyclePLStmt->execute([$userId, $soDate]);
     $cyclePL = (float)$cyclePLStmt->fetch()['total'];
 }
 
@@ -247,7 +244,7 @@ include '../includes/header.php';
                     <div class="mb-3">
                         <label class="form-label">Amount (USD)</label>
                         <div class="input-group">
-                            <span class="input-group-text" style="background:var(--bg-elevated);border-color:var(--border);color:var(--text-muted)">$</span>
+                            <span class="input-group-text" style="background:var(--bg-elevated);border-color:var(--border);color:var(--text-muted)"><?= getActiveCurrency()['symbol'] ?></span>
                             <input type="number" class="form-control" name="amount" placeholder="0.00" step="0.01" min="0.01" required>
                         </div>
                     </div>
@@ -505,7 +502,7 @@ if ($soRows):
                 <div class="modal-body">
                     <div class="risk-alert risk-alert-breach mb-3" style="border-radius:var(--radius-sm)">
                         <i class="fas fa-ban"></i>
-                        <div><strong>This will reset your account balance to $0.00 and start a new cycle.</strong><br>
+                        <div><strong>This will reset your account balance to <?= formatUSD(0) ?> and start a new cycle.</strong><br>
                         <small>Current balance: <strong><?= $balance >= 0 ? formatUSD($balance) : '-' . formatUSD(abs($balance)) ?></strong>. All trades and history are preserved.</small></div>
                     </div>
                     <div class="row g-2 mb-3">

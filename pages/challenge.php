@@ -284,9 +284,9 @@ a.chal-cal-cell:hover{transform:scale(1.12);border-color:var(--accent)}
 
         <div class="row g-3 mb-3">
             <div class="col-md-6">
-                <label style="font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:700;display:block;margin-bottom:6px">Starting Capital ($)</label>
+                <label style="font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:700;display:block;margin-bottom:6px">Starting Capital (<?= getActiveCurrency()['symbol'] ?>)</label>
                 <div class="input-group">
-                    <span class="input-group-text" style="background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted)">$</span>
+                    <span class="input-group-text" style="background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted)"><?= getActiveCurrency()['symbol'] ?></span>
                     <input type="number" name="starting_capital" class="form-control" step="0.01" value="<?= number_format(getCurrentBalance($userId), 2, '.', '') ?>" style="background:var(--bg-elevated);border:1px solid var(--border);border-left:none;color:var(--text-primary)">
                 </div>
             </div>

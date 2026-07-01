@@ -230,16 +230,17 @@ include '../includes/header.php';
             <input type="number" name="losses" class="form-ctrl" min="0" value="<?= $existing['losses'] ?? 0 ?>">
         </div>
         <div class="col-md-6">
-            <label class="form-label-sm">Ending Equity ($) <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.72rem">optional</span></label>
+            <label class="form-label-sm">Ending Equity (<?= getActiveCurrency()['symbol'] ?>) <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.72rem">optional</span></label>
             <div class="input-group">
-                <span class="input-group-text" style="background:var(--bg-elevated);border:1px solid var(--border);border-right:none;color:var(--text-muted)">$</span>
+                <span class="input-group-text" style="background:var(--bg-elevated);border:1px solid var(--border);border-right:none;color:var(--text-muted)"><?= getActiveCurrency()['symbol'] ?></span>
                 <input type="number" name="equity_end" class="form-ctrl" step="0.01" placeholder="Account equity at end of day" value="<?= $existing && $existing['equity_end'] !== null ? number_format($existing['equity_end'],2,'.','') : '' ?>" style="border-radius:0 9px 9px 0;border-left:none">
             </div>
         </div>
         <div class="col-md-6 d-flex align-items-end">
             <div id="plPreview" style="font-family:'DM Mono',monospace;font-size:1.5rem;font-weight:800;padding-bottom:4px">
                 <?php $pl = $existing ? (float)$existing['daily_pl'] : 0;
-                echo ($pl >= 0 ? '<span style="color:var(--profit)">+$' : '<span style="color:var(--loss)">-$') . number_format(abs($pl),2) . '</span>'; ?>
+                $cs_cd = getActiveCurrency()['symbol'];
+                echo ($pl >= 0 ? '<span style="color:var(--profit)">+' : '<span style="color:var(--loss)">-') . $cs_cd . number_format(abs($pl),2) . '</span>'; ?>
             </div>
         </div>
     </div>
@@ -345,6 +346,7 @@ include '../includes/header.php';
 <?php include '../includes/footer.php'; ?>
 
 <script>
+const CS = <?= json_encode(getActiveCurrency()['symbol']) ?>;
 const CHECKS = ['check_higher_tf','check_key_levels','check_confirmation','check_risk_mgmt','check_no_revenge','check_setup_only','check_stop_loss','check_calm'];
 const POS_EMOS = ['Calm','Confidence','Patience'];
 const NEG_EMOS = ['Revenge','FOMO','Overtrading','Greed','Fear'];
@@ -429,8 +431,8 @@ function updatePLPreview(val) {
     var v = parseFloat(val) || 0;
     var el = document.getElementById('plPreview');
     el.innerHTML = v >= 0
-        ? '<span style="color:var(--profit)">+$' + Math.abs(v).toFixed(2) + '</span>'
-        : '<span style="color:var(--loss)">-$' + Math.abs(v).toFixed(2) + '</span>';
+        ? '<span style="color:var(--profit)">+' + CS + Math.abs(v).toFixed(2) + '</span>'
+        : '<span style="color:var(--loss)">-' + CS + Math.abs(v).toFixed(2) + '</span>';
 }
 
 // Init warnings

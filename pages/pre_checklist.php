@@ -247,7 +247,7 @@ include '../includes/header.php';
                 <span class="check-label"><span style="color:var(--accent)">Q5.</span> What is your max loss limit for today?</span>
                 <span class="check-sublabel">Stop trading the moment you hit this number. No exceptions.</span>
                 <div class="input-group" style="max-width:220px">
-                    <span class="input-group-text" style="background:var(--bg-base);border-color:var(--border);color:var(--text-muted)">$</span>
+                    <span class="input-group-text" style="background:var(--bg-base);border-color:var(--border);color:var(--text-muted)"><?= getActiveCurrency()['symbol'] ?></span>
                     <input type="number" name="max_loss_today" class="form-control"
                         value="<?= MAX_DAILY_LOSS_DOLLAR ?>" min="1" step="0.01"
                         style="background:var(--bg-base);border-color:var(--border);color:var(--text-primary)">

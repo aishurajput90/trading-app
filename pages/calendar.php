@@ -116,6 +116,50 @@ foreach ($rawDays as $r) {
 }
 $isCurrentMonth = ($month == $todayM && $year == $todayY);
 
+// ── Per-day starting balance — mirrors getCurrentBalance() logic exactly ──
+$lastDayOfMonth = sprintf('%04d-%02d-%02d', $year, $month, $daysInMonth);
+
+// Respect last stop_out (getCurrentBalance resets to 0 at that point)
+$soStmt2 = $db->prepare("SELECT date FROM transactions WHERE user_id=? AND type='stop_out' AND date <= ? ORDER BY date DESC, created_at DESC LIMIT 1");
+$soStmt2->execute([$userId, $lastDayOfMonth]);
+$lastSORow  = $soStmt2->fetch();
+$sinceDate  = $lastSORow ? $lastSORow['date'] : '0000-00-00';
+
+$histPlStmt = $db->prepare("
+    SELECT DATE(trade_datetime) AS day,
+           COALESCE(SUM(profit_loss - brokerage + swap), 0) AS day_net
+    FROM trades WHERE user_id = ? AND DATE(trade_datetime) > ? AND DATE(trade_datetime) <= ?
+    GROUP BY DATE(trade_datetime) ORDER BY 1
+");
+$histPlStmt->execute([$userId, $sinceDate, $lastDayOfMonth]);
+
+$histTxStmt = $db->prepare("
+    SELECT date,
+           SUM(CASE WHEN type='deposit' THEN amount
+                    WHEN type='withdraw' THEN -amount ELSE 0 END) AS day_tx
+    FROM transactions WHERE user_id=? AND type IN ('deposit','withdraw') AND date > ? AND date <= ?
+    GROUP BY date ORDER BY date
+");
+$histTxStmt->execute([$userId, $sinceDate, $lastDayOfMonth]);
+// Note: transactions use date <= (include same-day deposits in day open)
+// P&L uses date < (exclude same-day trades from day open)
+
+$allEvents = [];
+foreach ($histPlStmt->fetchAll() as $r) $allEvents[$r['day']]['pl'] = (float)$r['day_net'];
+foreach ($histTxStmt->fetchAll() as $r) $allEvents[$r['date']]['tx'] = (float)$r['day_tx'];
+ksort($allEvents);
+
+$dayStartBalances = [];
+$runBal = 0; // starts at 0, same as getCurrentBalance()
+foreach ($allEvents as $evDay => $ev) {
+    $evY = (int)substr($evDay, 0, 4);
+    $evM = (int)substr($evDay, 5, 2);
+    $evD = (int)substr($evDay, 8, 2);
+    $runBal += ($ev['tx'] ?? 0);           // same-day deposits → part of Day Open
+    if ($evY === $year && $evM === $month) $dayStartBalances[$evD] = $runBal;
+    $runBal += ($ev['pl'] ?? 0);           // same-day P&L → after Day Open
+}
+
 $pageTitle = 'Calendar';
 $rootPath  = '../';
 include '../includes/header.php';
@@ -233,6 +277,7 @@ include '../includes/header.php';
     border-radius:99px; font-size:9px; font-weight:600; color:var(--text-muted); padding:2px 7px;
 }
 .cal-star { position:absolute; top:7px; right:8px; font-size:11px; }
+.cal-pct  { font-family:var(--font-mono); font-size:10px; font-weight:700; line-height:1.2; margin-bottom:3px; opacity:.85; }
 .pl-positive { color:var(--profit); }
 .pl-negative { color:var(--loss); }
 
@@ -376,26 +421,26 @@ include '../includes/header.php';
         <div class="cal-stat">
             <div class="cal-stat-lbl">Net P&amp;L</div>
             <div class="cal-stat-val big <?= $monthNet >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($monthNet >= 0 ? '+' : '') ?>$<?= number_format($monthNet, 2) ?>
+                <?= formatPL($monthNet) ?>
             </div>
             <div class="cal-stat-sub">After all charges</div>
         </div>
         <div class="cal-stat">
             <div class="cal-stat-lbl">Gross P&amp;L</div>
             <div class="cal-stat-val <?= $monthGross >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($monthGross >= 0 ? '+' : '') ?>$<?= number_format($monthGross, 2) ?>
+                <?= formatPL($monthGross) ?>
             </div>
             <div class="cal-stat-sub">Before charges</div>
         </div>
         <div class="cal-stat">
             <div class="cal-stat-lbl">Brokerage</div>
-            <div class="cal-stat-val neg">-$<?= number_format($monthBrok, 2) ?></div>
+            <div class="cal-stat-val neg">-<?= formatUSD($monthBrok) ?></div>
             <div class="cal-stat-sub">Commission paid</div>
         </div>
         <div class="cal-stat">
             <div class="cal-stat-lbl">Swap</div>
             <div class="cal-stat-val <?= $monthSwap >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($monthSwap >= 0 ? '+' : '') ?>$<?= number_format($monthSwap, 2) ?>
+                <?= formatPL($monthSwap) ?>
             </div>
             <div class="cal-stat-sub">Overnight</div>
         </div>
@@ -428,16 +473,17 @@ include '../includes/header.php';
 </div>
 
 <!-- Best Day Cards -->
-<?php if ($bestDay || $allTimeBest): ?>
+<?php $showBestMonth = $bestDay && $bestDay['net_pl'] > 0; ?>
+<?php if ($showBestMonth || $allTimeBest): ?>
 <div class="cal-best-row">
-    <?php if ($bestDay): ?>
+    <?php if ($showBestMonth): ?>
     <div class="cal-best">
         <div class="cal-best-lbl"><i class="fas fa-star" style="color:var(--warning)"></i> Best Day This Month</div>
         <div class="cal-best-date"><?= date('l, d M Y', strtotime($bestDay['day'])) ?></div>
-        <div class="cal-best-net">+$<?= number_format($bestDay['net_pl'], 2) ?></div>
+        <div class="cal-best-net"><?= formatPL($bestDay['net_pl']) ?></div>
         <div class="cal-best-meta">
-            Gross +$<?= number_format($bestDay['gross_pl'], 2) ?>
-            &nbsp;·&nbsp; Brok -$<?= number_format($bestDay['total_brok'], 2) ?>
+            Gross <?= formatPL($bestDay['gross_pl']) ?>
+            &nbsp;·&nbsp; Brok -<?= formatUSD($bestDay['total_brok']) ?>
             &nbsp;·&nbsp; <?= $bestDay['trade_count'] ?> trade<?= $bestDay['trade_count'] != 1 ? 's' : '' ?>
         </div>
     </div>
@@ -446,8 +492,8 @@ include '../includes/header.php';
     <div class="cal-best" style="border-left-color:var(--accent-purple)">
         <div class="cal-best-lbl"><i class="fas fa-trophy" style="color:var(--accent-purple)"></i> Best Day All Time</div>
         <div class="cal-best-date"><?= date('l, d M Y', strtotime($allTimeBest['day'])) ?></div>
-        <div class="cal-best-net" style="color:var(--accent-purple)">+$<?= number_format($allTimeBest['net_pl'], 2) ?></div>
-        <div class="cal-best-meta">Gross +$<?= number_format($allTimeBest['gross_pl'], 2) ?></div>
+        <div class="cal-best-net" style="color:var(--accent-purple)"><?= formatPL($allTimeBest['net_pl']) ?></div>
+        <div class="cal-best-meta">Gross <?= formatPL($allTimeBest['gross_pl']) ?></div>
     </div>
     <?php endif; ?>
 </div>
@@ -495,14 +541,24 @@ include '../includes/header.php';
             if ($isWeekend) $cls .= ' wknd-cell';
             if ($hasData)   $cls .= ' has-data';
 
+            $startBal = $dayStartBalances[$day] ?? 0;
+            $netPct   = ($startBal > 0 && $hasData) ? round($net / $startBal * 100, 2) : 0;
+
             // High-brokerage flag: brok ate >25% of gross, or flipped a gross-profit into net-loss
             $brokHigh = $hasData && $brok > 0 && $gross > 0 && ($brok / $gross) > 0.25;
             $brokHigh = $brokHigh || ($hasData && $gross > 0 && $net < 0 && $brok > 0);
 
-            // Tooltip shows swap + brok% (the parts not visible in the cell)
-            $brokPct = ($hasData && $gross > 0) ? round($brok / $gross * 100, 1) : 0;
+            // Tooltip shows day open/close + swap + brok%
+            $dayClose = $startBal + $net;
+            $brokPct  = ($hasData && $gross > 0) ? round($brok / $gross * 100, 1) : 0;
+            $cs  = getActiveCurrency()['symbol'];
             $tip = $hasData
-                ? "Swap:    " . ($swap >= 0 ? '+' : '') . '$' . number_format($swap, 2)
+                ? ($startBal > 0
+                    ? "Day open: {$cs}" . number_format($startBal, 2)
+                    . "\nDay close: {$cs}" . number_format($dayClose, 2)
+                    . "\n"
+                    : "")
+                . "Swap:    " . ($swap >= 0 ? '+' : '') . $cs . number_format($swap, 2)
                 . "\nBrok:    " . $brokPct . "% of gross"
                 . ($brokHigh ? "\n⚠ High brokerage day" : "")
                 . "\nTrades:  " . $cnt . "  ·  click for full detail"
@@ -515,21 +571,26 @@ include '../includes/header.php';
             <?php if ($isBest): ?><div class="cal-star" title="Best day this month">&#11088;</div><?php endif; ?>
             <?php if ($hasData): ?>
                 <div class="cal-gross <?= $gross >= 0 ? 'pl-positive' : 'pl-negative' ?>">
-                    <?= ($gross >= 0 ? '+' : '') ?>$<?= number_format($gross, 2) ?>
+                    <?= formatPL($gross) ?>
                     <span class="cal-row-lbl">gross</span>
                 </div>
                 <?php if ($brok > 0): ?>
                 <div class="cal-brok-row <?= $brokHigh ? 'hi' : '' ?>">
-                    -$<?= number_format($brok, 2) ?>
+                    -<?= formatUSD($brok) ?>
                     <span class="cal-row-lbl">brok</span>
                     <i class="fas fa-triangle-exclamation cal-brok-warn" title="High brokerage"></i>
                 </div>
                 <?php endif; ?>
                 <div class="cal-cell-sep"></div>
                 <div class="cal-net-pl <?= $net >= 0 ? 'pl-positive' : 'pl-negative' ?>">
-                    <?= ($net >= 0 ? '+' : '') ?>$<?= number_format($net, 2) ?>
+                    <?= formatPL($net) ?>
                     <span class="cal-row-lbl">net</span>
                 </div>
+                <?php if ($netPct != 0): ?>
+                <div class="cal-pct <?= $netPct >= 0 ? 'pl-positive' : 'pl-negative' ?>">
+                    <?= ($netPct >= 0 ? '+' : '') ?><?= number_format($netPct, 2) ?>%
+                </div>
+                <?php endif; ?>
                 <span class="cal-trade-badge">
                     <i class="fas fa-arrow-right-arrow-left" style="font-size:7px"></i>
                     <?= $cnt ?> trade<?= $cnt != 1 ? 's' : '' ?>
@@ -565,26 +626,26 @@ include '../includes/header.php';
         <div class="cal-stat">
             <div class="cal-stat-lbl">Net P&amp;L <?= $year ?></div>
             <div class="cal-stat-val big <?= $yearNet >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($yearNet >= 0 ? '+' : '') ?>$<?= number_format($yearNet, 2) ?>
+                <?= formatPL($yearNet) ?>
             </div>
             <div class="cal-stat-sub">After all charges</div>
         </div>
         <div class="cal-stat">
             <div class="cal-stat-lbl">Gross P&amp;L</div>
             <div class="cal-stat-val <?= $yearGross >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($yearGross >= 0 ? '+' : '') ?>$<?= number_format($yearGross, 2) ?>
+                <?= formatPL($yearGross) ?>
             </div>
             <div class="cal-stat-sub">Before charges</div>
         </div>
         <div class="cal-stat">
             <div class="cal-stat-lbl">Brokerage</div>
-            <div class="cal-stat-val neg">-$<?= number_format($yearBrok, 2) ?></div>
+            <div class="cal-stat-val neg">-<?= formatUSD($yearBrok) ?></div>
             <div class="cal-stat-sub">Commission paid</div>
         </div>
         <div class="cal-stat">
             <div class="cal-stat-lbl">Swap</div>
             <div class="cal-stat-val <?= $yearSwap >= 0 ? 'pos' : 'neg' ?>">
-                <?= ($yearSwap >= 0 ? '+' : '') ?>$<?= number_format($yearSwap, 2) ?>
+                <?= formatPL($yearSwap) ?>
             </div>
             <div class="cal-stat-sub">Overnight</div>
         </div>
@@ -643,7 +704,7 @@ include '../includes/header.php';
                 <span><?= date('M', $mFirst) ?></span>
                 <?php if ($mTrades > 0): ?>
                 <span class="<?= $mNet >= 0 ? 'pos' : 'neg' ?>" style="font-family:var(--font-mono);font-size:11px;font-weight:700">
-                    <?= ($mNet >= 0 ? '+' : '') ?>$<?= number_format($mNet, 2) ?>
+                    <?= formatPL($mNet) ?>
                 </span>
                 <?php else: ?>
                 <span style="font-size:9px;color:var(--text-muted)">no trades</span>
@@ -684,11 +745,12 @@ include '../includes/header.php';
                     if ($hasData2) $cCls .= ' has-data';
 
                     $cBrokPct = ($hasData2 && $cGross > 0) ? round($cBrok / $cGross * 100, 1) : 0;
+                    $cs2  = getActiveCurrency()['symbol'];
                     $cTip = $hasData2
                         ? date('d M', strtotime($ds))
-                        . "\nNet:    " . ($cNet >= 0 ? '+' : '') . '$' . number_format($cNet, 2)
-                        . "\nGross:  " . ($cGross >= 0 ? '+' : '') . '$' . number_format($cGross, 2)
-                        . "\nBrok:   -\$" . number_format($cBrok, 2) . " ({$cBrokPct}%)"
+                        . "\nNet:    " . ($cNet >= 0 ? '+' : '') . $cs2 . number_format($cNet, 2)
+                        . "\nGross:  " . ($cGross >= 0 ? '+' : '') . $cs2 . number_format($cGross, 2)
+                        . "\nBrok:   -{$cs2}" . number_format($cBrok, 2) . " ({$cBrokPct}%)"
                         . "\nTrades: " . $cCnt
                         : '';
                 ?>

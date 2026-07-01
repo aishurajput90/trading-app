@@ -51,7 +51,7 @@ function getCurrentUserId(): int {
 function getLoggedInUser(): array {
     static $user = null;
     if ($user === null && !empty($_SESSION['user_id'])) {
-        $stmt = getDB()->prepare("SELECT id, name, email, initial_balance, created_at, role FROM users WHERE id = ?");
+        $stmt = getDB()->prepare("SELECT id, name, email, initial_balance, currency, created_at, role FROM users WHERE id = ?");
         $stmt->execute([$_SESSION['user_id']]);
         $user = $stmt->fetch() ?: [];
     }
